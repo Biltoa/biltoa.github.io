@@ -1,0 +1,66 @@
+/*!
+Theme Name: Ramsay
+Theme URI: http://paul-themes.com/wordpress/ramsay
+Author: VLThemes
+Author URI: https://themeforest.net/user/vlthemes
+Description: Ramsay is suitable for personal, portfolio, designer, freelance, and another websites. It is a high performance WordPress theme it’s help to load your website fast and it’s fully optimize and clean code help search engine to optimize website.
+Version: 1.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: ramsay
+Tags: one-column, two-columns, right-sidebar, flexible-header, accessibility-ready, custom-colors, custom-header, custom-menu, custom-logo, editor-style, featured-images, footer-widgets, post-formats, rtl-language-support, sticky-post, theme-options, threaded-comments, translation-ready
+*/
+
+html {
+	overflow-y: scroll;
+}
+
+body {
+	margin: 0;
+	font-family: 'Arial' , sans-serif;
+	font-size: 14px;
+	color: #757575;
+}
+
+/* WordPress API Elements */
+
+.wp-caption {
+	margin: 30px 0;
+	font-size: 16px;
+	text-align: center;
+	font-style: italic;
+	max-width: 100%;
+}
+
+.wp-caption p,
+.wp-caption-text {
+	margin: 0;
+	margin-top: 5px;
+}
+
+.wp-caption-text,
+.sticky,
+.gallery-caption,
+.bypostauthor,
+.screen-reader-text {
+	visibility: visible;
+}
+
+.screen-reader-text {
+	display: none;
+}
+
+.aligncenter {
+	margin: 30px auto;
+	display: block;
+}
+
+.alignright {
+	margin: 10px 0 10px 30px;
+	float: right;
+}
+
+.alignleft {
+	margin: 10px 30px 10px 0;
+	float: left;
+}
