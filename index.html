@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Homenaje&display=swap" rel="stylesheet">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ahmad Bilto - Portfolio</title>
+    <meta name="description" content="Portfolio of Ahmad Bilto - Game Developer, Web Developer, and Hobbyist Photographer." />
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              display: ['Space Grotesk', 'sans-serif'],
+            },
+            colors: {
+              sage: {
+                50: '#f7f8f6',
+                100: '#ecedea',
+                200: '#dbe0d6',
+                300: '#c2c9b8',
+                400: '#a3ad94',
+                500: '#848c67', // Primary Brand Color
+                600: '#697050',
+                700: '#52573f',
+                800: '#3e4230',
+                900: '#2a2d21',
+              },
+              stone: {
+                850: '#1f1f1e',
+              }
+            },
+            backgroundImage: {
+              'gradient-sage': 'linear-gradient(135deg, #848c67 0%, #f7f8f6 100%)',
+              'gradient-warm': 'linear-gradient(to right, #ecedea, #f7f8f6)',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f7f8f6; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #848c67; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #697050; 
+      }
+      
+      /* Animations */
+      .fade-in-up {
+        animation: fadeInUp 0.8s ease-out forwards;
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      
+      @keyframes fadeInUp {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* Lightbox specific */
+      .lightbox-open {
+        overflow: hidden;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/"
+  }
+}
+</script>
+<link rel="stylesheet" href="index.css">
+</head>
+  <!-- Applied global gradient: Starts dark sage (semi-transparent), goes to white in middle, ends dark sage opaque -->
+  <body class="bg-[linear-gradient(to_bottom,rgba(42,45,33,0.95)_0%,#ffffff_20%,#ffffff_80%,#2a2d21_100%)] min-h-screen text-stone-800 antialiased selection:bg-sage-300 selection:text-sage-900">
+
+    <!-- Navigation -->
+    <nav id="navbar" class="fixed w-full z-50 transition-all duration-500 py-6 bg-transparent">
+      <div class="container mx-auto px-6 flex justify-between items-center">
+        <a href="#home" class="font-display font-bold text-2xl tracking-tighter text-white z-50 relative">
+          AB.
+        </a>
+
+        <!-- Desktop Menu -->
+        <div class="hidden md:flex space-x-1">
+          <a href="#home" class="nav-link px-4 py-2 rounded-full text-sm font-medium tracking-wide text-stone-200 hover:text-white hover:bg-white/10 transition-all duration-300">Home</a>
+          <a href="#games" class="nav-link px-4 py-2 rounded-full text-sm font-medium tracking-wide text-stone-200 hover:text-white hover:bg-white/10 transition-all duration-300">Game Dev</a>
+          <a href="#skills" class="nav-link px-4 py-2 rounded-full text-sm font-medium tracking-wide text-stone-200 hover:text-white hover:bg-white/10 transition-all duration-300">Skills</a>
+          <a href="#gallery" class="nav-link px-4 py-2 rounded-full text-sm font-medium tracking-wide text-stone-200 hover:text-white hover:bg-white/10 transition-all duration-300">Gallery</a>
+          <a href="#contact" class="nav-link px-4 py-2 rounded-full text-sm font-medium tracking-wide text-stone-200 hover:text-white hover:bg-white/10 transition-all duration-300">Contact</a>
+        </div>
+
+        <!-- Mobile Menu Button -->
+        <div class="md:hidden z-50 relative">
+          <button id="menu-btn" class="text-white focus:outline-none p-2 hover:bg-white/10 rounded-lg transition-colors">
+            <i data-lucide="menu" class="w-7 h-7"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobile Dropdown -->
+      <div id="mobile-menu" class="fixed inset-0 bg-sage-900/95 backdrop-blur-xl transition-all duration-300 ease-in-out opacity-0 pointer-events-none flex items-center justify-center">
+        <div class="flex flex-col items-center space-y-8">
+          <a href="#home" class="mobile-link text-stone-300 text-2xl font-medium hover:text-white transition-colors">Home</a>
+          <a href="#games" class="mobile-link text-stone-300 text-2xl font-medium hover:text-white transition-colors">Game Dev</a>
+          <a href="#skills" class="mobile-link text-stone-300 text-2xl font-medium hover:text-white transition-colors">Skills</a>
+          <a href="#gallery" class="mobile-link text-stone-300 text-2xl font-medium hover:text-white transition-colors">Gallery</a>
+          <a href="#contact" class="mobile-link text-stone-300 text-2xl font-medium hover:text-white transition-colors">Contact</a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="relative h-screen w-full flex flex-col justify-end overflow-hidden">
+        <!-- Background Image -->
+        <div class="absolute inset-0 z-0">
+          <img 
+            src="/Users/bilto/Desktop/New folder/img.JPG" 
+            alt="Ahmad Bilto" 
+            class="w-full h-full object-cover object-top"
+          />
+          <!-- Opacity overlay -->
+          <div class="absolute inset-0 bg-sage-900/20"></div>
+          <!-- Gradient overlay to make text readable but keep face clear -->
+          <div class="absolute inset-0 bg-gradient-to-t from-stone-900 via-stone-900/60 to-transparent"></div>
+        </div>
+  
+        <!-- Content -->
+        <div class="relative z-10 w-full pb-20 px-6 md:pb-32 container mx-auto fade-in-up">
+          <div class="max-w-4xl">
+              <h2 class="text-sage-300 font-medium tracking-widest text-sm uppercase mb-4 pl-1">
+                  Portfolio
+              </h2>
+              <h1 class="font-display text-5xl md:text-7xl lg:text-8xl font-bold text-stone-100 mb-6 tracking-tight leading-none">
+                  Ahmad Bilto
+              </h1>
+              <p id = "hero-text" class="text-xl md:text-2xl text-stone-200 font-light mb-10 max-w-2xl leading-relaxed">
+                  Game Developer <span class="text-sage-400 px-2">•</span> 
+                  Web Developer <span class="text-sage-400 px-2">•</span> 
+                  Hobbyist Photographer
+              </p>
+              
+              <div class="flex flex-col sm:flex-row gap-4">
+                  <a href="#gallery" class="flex items-center justify-center gap-2 bg-sage-500 hover:bg-sage-400 text-white px-8 py-3 rounded-full font-medium transition-all duration-300 shadow-lg hover:shadow-sage-500/30 transform hover:-translate-y-1">
+                      <i data-lucide="camera" class="w-5 h-5"></i>
+                      <span>View Gallery</span>
+                  </a>
+                  <a href="./assets/Resume-Ahmad_Bilto.pdf" target="_blank" class="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white px-8 py-3 rounded-full font-medium transition-all duration-300">
+                      <i data-lucide="file-text" class="w-5 h-5"></i>
+                      <span>Download Resume</span>
+                  </a>
+              </div>
+          </div>
+        </div>
+  
+        <!-- Scroll Indicator -->
+        <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 animate-bounce z-20">
+          <a href="#games" class="text-stone-400 hover:text-white transition-colors p-2">
+              <i data-lucide="arrow-down" class="w-8 h-8"></i>
+          </a>
+        </div>
+    </section>
+
+    <!-- Game Development Section -->
+    <!-- Updated styling: Dark text on Light background to contrast with the white page gradient -->
+    <section id="games" class="py-24 px-6 relative overflow-hidden">
+        <!-- Decorative Elements adjusted for light background -->
+        <div class="absolute top-0 right-0 w-96 h-96 bg-sage-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+        <div class="absolute bottom-0 left-0 w-64 h-64 bg-sage-300/20 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
+
+      <div class="container mx-auto max-w-4xl relative z-10 text-center">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sage-100 border border-sage-200 text-sage-600 text-xs font-medium uppercase tracking-wider mb-6">
+            <i data-lucide="gamepad-2" class="w-3.5 h-3.5"></i>
+            Game Development
+        </div>
+        
+        <h2 class="font-display text-4xl md:text-5xl font-bold mb-6 text-stone-900">
+            Interactive Experiences
+        </h2>
+        
+        <p class="text-stone-600 text-lg leading-relaxed mb-12 max-w-2xl mx-auto">
+            My passion lies in creating interactive systems and engaging gameplay loops. 
+            Check out my live demos on Itch.io or download my resume to see my history.
+        </p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+            <!-- Itch.io Card (Updated for Light Theme) -->
+            <a href="https://biltoa.itch.io/" target="_blank" rel="noopener noreferrer" class="group relative overflow-hidden rounded-3xl bg-white border border-sage-200 p-8 flex flex-col items-center justify-center text-center hover:border-sage-400 transition-all duration-300 hover:shadow-xl hover:shadow-sage-200/50">
+                <div class="absolute inset-0 bg-sage-50 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <i data-lucide="gamepad-2" class="w-12 h-12 text-sage-500 mb-4 group-hover:scale-110 transition-transform duration-300"></i>
+                <h3 class="text-xl font-bold text-stone-800 mb-2 z-10">Itch.io Profile</h3>
+                <p class="text-stone-500 text-sm mb-6 z-10">Play my latest game jam submissions and prototypes.</p>
+                <span class="inline-flex items-center text-sage-600 text-sm font-medium group-hover:text-sage-800 transition-colors z-10">
+                    Visit Page <i data-lucide="external-link" class="w-3.5 h-3.5 ml-1"></i>
+                </span>
+            </a>
+
+            <!-- Resume Card (Updated for Light Theme) -->
+            <a href="./assets/Resume-Ahmad_Bilto.pdf" target="_blank" rel="noopener noreferrer" class="group relative overflow-hidden rounded-3xl bg-stone-50 border border-stone-200 p-8 flex flex-col items-center justify-center text-center hover:border-stone-400 transition-all duration-300 hover:shadow-xl">
+                <div class="absolute inset-0 bg-white opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <i data-lucide="file-text" class="w-12 h-12 text-stone-600 mb-4 group-hover:scale-110 transition-transform duration-300"></i>
+                <h3 class="text-xl font-bold text-stone-800 mb-2 z-10">Resume / CV</h3>
+                <p class="text-stone-500 text-sm mb-6 z-10">Download my full professional background and skills.</p>
+                <span class="inline-flex items-center text-stone-600 text-sm font-medium group-hover:text-stone-800 transition-colors z-10">
+                    Download PDF <i data-lucide="external-link" class="w-3.5 h-3.5 ml-1"></i>
+                </span>
+            </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Skills Section -->
+    <!-- Updated background to #2a2d21 and text/cards to dark theme -->
+    <section id="skills" class="py-24 px-6 relative z-10 bg-[#2a2d21]">
+      <div class="container mx-auto max-w-5xl">
+        <div class="text-center mb-16">
+          <h2 class="font-display text-4xl font-bold text-white mb-4">Technical Arsenal</h2>
+          <p class="text-stone-400 max-w-2xl mx-auto">
+            Tools and technologies I use to bring ideas to life.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <!-- Skill Items (Updated for Dark Theme) -->
+          <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+              <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                  <i data-lucide="gamepad-2" class="w-8 h-8" stroke-width="1.5"></i>
+              </div>
+              <h3 class="font-medium text-stone-100">Unity Engine</h3>
+              <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Game</span>
+          </div>
+          
+          <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+              <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                  <i data-lucide="braces" class="w-8 h-8" stroke-width="1.5"></i>
+              </div>
+              <h3 class="font-medium text-stone-100">Gameplay Programming</h3>
+              <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Game</span>
+          </div>
+
+          <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+            <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                <i data-lucide="computer" class="w-8 h-8" stroke-width="1.5"></i>
+            </div>
+            <h3 class="font-medium text-stone-100">C#</h3>
+            <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Game</span>
+        </div>
+
+        <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+            <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                <i data-lucide="wallpaper" class="w-8 h-8" stroke-width="1.5"></i>
+            </div>
+            <h3 class="font-medium text-stone-100">Game Design</h3>
+            <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Game</span>
+        </div>
+
+        <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+            <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                <i data-lucide="terminal" class="w-8 h-8" stroke-width="1.5"></i>
+            </div>
+            <h3 class="font-medium text-stone-100">Python</h3>
+            <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Web</span>
+        </div>
+
+        <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+            <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                <i data-lucide="code" class="w-8 h-8" stroke-width="1.5"></i>
+            </div>
+            <h3 class="font-medium text-stone-100">JavaScript</h3>
+            <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Web</span>
+        </div>
+
+        <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+            <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                <i data-lucide="cpu" class="w-8 h-8" stroke-width="1.5"></i>
+            </div>
+            <h3 class="font-medium text-stone-100">PHP</h3>
+            <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Web</span>
+        </div>
+
+        <div class="skill-card bg-white/5 p-6 rounded-2xl shadow-sm border border-white/10 hover:border-sage-500/50 hover:bg-white/10 transition-all duration-300 flex flex-col items-center justify-center text-center group transform hover:-translate-y-1">
+            <div class="p-4 bg-sage-900/50 rounded-full mb-4 text-stone-400 group-hover:text-sage-400 group-hover:bg-sage-900 transition-colors">
+                <i data-lucide="square-dashed-bottom-code" class="w-8 h-8" stroke-width="1.5"></i>
+            </div>
+            <h3 class="font-medium text-stone-100">HTML/CSS</h3>
+            <span class="text-xs text-sage-500 mt-1 uppercase tracking-wider font-semibold">Web</span>
+        </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Gallery Section -->
+    <section id="gallery" class="py-24 px-6 relative z-10">
+      <div class="container mx-auto max-w-6xl">
+        <div class="text-center mb-16">
+          <h2 class="font-display text-4xl font-bold text-stone-900 mb-4">Through The Lens</h2>
+          <p class="text-stone-500">Capturing moments, light, and atmosphere.</p>
+        </div>
+
+        <!-- Masonry-style Grid -->
+        <div class="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6">
+  
+  <!-- Image 1 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0001.jpg', '')">
+    <img src="./assets/images/IMG_0001.jpg" alt="Nature Walk" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 2 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0002.jpg', '')">
+    <img src="./assets/images/IMG_0002.jpg" alt="Urban Shadows" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 3 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0003.jpg', '')">
+    <img src="./assets/images/IMG_0003.jpg" alt="Coastal Waves" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 4 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0004.jpg', '')">
+    <img src="./assets/images/IMG_0004.jpg" alt="Portrait Study" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 5 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0005.jpg', '')">
+    <img src="./assets/images/IMG_0005.jpg" alt="Mountain Peak" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 6 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0006.jpg', '')">
+    <img src="./assets/images/IMG_0006.jpg" alt="Night Sky" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 7 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0007.jpg', '')">
+    <img src="./assets/images/IMG_0007.jpg" alt="Gallery Image 7" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 8 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0008.jpg', '')">
+    <img src="./assets/images/IMG_0008.jpg" alt="Gallery Image 8" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 9 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0009.jpg', '')">
+    <img src="./assets/images/IMG_0009.jpg" alt="Gallery Image 9" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 10 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0010.jpg', '')">
+    <img src="./assets/images/IMG_0010.jpg" alt="Gallery Image 10" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 11 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0011.jpg', '')">
+    <img src="./assets/images/IMG_0011.jpg" alt="Gallery Image 11" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 12 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0012.jpg', '')">
+    <img src="./assets/images/IMG_0012.jpg" alt="Gallery Image 12" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 13 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0013.jpg', '')">
+    <img src="./assets/images/IMG_0013.jpg" alt="Gallery Image 13" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 14 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0014.jpg', '')">
+    <img src="./assets/images/IMG_0014.jpg" alt="Gallery Image 14" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 15 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0015.jpg', '')">
+    <img src="./assets/images/IMG_0015.jpg" alt="Gallery Image 15" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 16 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0016.jpg', '')">
+    <img src="./assets/images/IMG_0016.jpg" alt="Gallery Image 16" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 17 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0017.jpg', '')">
+    <img src="./assets/images/IMG_0017.jpg" alt="Gallery Image 17" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 18 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0018.jpg', '')">
+    <img src="./assets/images/IMG_0018.jpg" alt="Gallery Image 18" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 19 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0019.jpg', '')">
+    <img src="./assets/images/IMG_0019.jpg" alt="Gallery Image 19" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 20 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0020.jpg', '')">
+    <img src="./assets/images/IMG_0020.jpg" alt="Gallery Image 20" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+  <!-- Image 21 -->
+  <div class="break-inside-avoid relative group rounded-2xl overflow-hidden cursor-pointer shadow-md hover:shadow-xl hover:shadow-sage-200/50 transition-all duration-500" onclick="openLightbox('./assets/images/IMG_0021.jpg', '')">
+    <img src="./assets/images/IMG_0021.jpg" alt="Gallery Image 21" class="w-full h-auto object-cover transform transition-transform duration-700 group-hover:scale-105" />
+    <div class="absolute inset-0 bg-sage-900/60 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+       <div class="text-white text-center p-4 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+          <p class="font-display font-medium text-xl mb-1"></p>
+          <div class="inline-flex items-center gap-2 text-sage-200 text-sm uppercase tracking-widest mt-2">
+              <i data-lucide="zoom-in" class="w-4 h-4"></i>
+              <span>View</span>
+          </div>
+       </div>
+    </div>
+  </div>
+
+</div>
+      </div>
+    </section>
+
+    <!-- Footer / Contact -->
+    <footer id="contact" class="bg-sage-900 text-stone-200 pt-24 pb-12 px-6 border-t border-sage-800" style="margin-top: -1px;">
+        <div class="container mx-auto max-w-5xl">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-16 mb-20">
+            
+            <!-- Info Column -->
+            <div>
+              <h2 class="font-display text-4xl font-bold text-white mb-8">Let's Connect</h2>
+              <p class="text-sage-200 mb-10 max-w-md leading-relaxed text-lg font-light">
+                I'm always open to discussing game development, web technologies, or photography. 
+              </p>
+              
+              <div class="space-y-6">
+                <div class="flex items-center gap-5 text-stone-300 group">
+                  <div class="p-3 bg-sage-800 rounded-xl group-hover:bg-sage-700 transition-colors">
+                      <i data-lucide="map-pin" class="w-5 h-5 text-sage-400 group-hover:text-sage-200"></i>
+                  </div>
+                  <span class="text-lg">Amman, Jordan</span>
+                </div>
+                <div class="flex items-center gap-5 text-stone-300 group">
+                  <div class="p-3 bg-sage-800 rounded-xl group-hover:bg-sage-700 transition-colors">
+                      <i data-lucide="mail" class="w-5 h-5 text-sage-400 group-hover:text-sage-200"></i>
+                  </div>
+                  <a href="mailto:contact@ahmadbilto.com" class="text-lg hover:text-white transition-colors">
+                      biltoa@outlook.com
+                  </a>
+                </div>
+                <div class="flex items-center gap-5 text-stone-300 group">
+                  <div class="p-3 bg-sage-800 rounded-xl group-hover:bg-sage-700 transition-colors">
+                      <i data-lucide="phone" class="w-5 h-5 text-sage-400 group-hover:text-sage-200"></i>
+                  </div>
+                  <span class="text-lg">+962 79 0405 940</span>
+                </div>
+              </div>
+            </div>
+  
+            <!-- Socials Column -->
+            <div class="flex flex-col justify-center">
+               <h3 class="text-white font-medium mb-6 md:hidden">Social Profiles</h3>
+               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <a href="https://www.linkedin.com/in/ahmad-bilto/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-4 p-5 bg-sage-800/30 hover:bg-sage-800 rounded-2xl transition-all duration-300 border border-sage-800 hover:border-sage-600 group hover:-translate-y-1">
+                      <div class="p-2 bg-sage-900 rounded-lg group-hover:bg-sage-700 transition-colors">
+                          <i data-lucide="linkedin" class="w-5 h-5 text-sage-400 group-hover:text-white"></i>
+                      </div>
+                      <div class="flex flex-col">
+                          <span class="font-medium text-white">LinkedIn</span>
+                          <span class="text-xs text-sage-400 group-hover:text-sage-200 transition-colors">/in/ahmad-bilto</span>
+                      </div>
+                  </a>
+                  
+                  <a href="https://www.instagram.com/biltoa/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-4 p-5 bg-sage-800/30 hover:bg-sage-800 rounded-2xl transition-all duration-300 border border-sage-800 hover:border-sage-600 group hover:-translate-y-1">
+                    <div class="p-2 bg-sage-900 rounded-lg group-hover:bg-sage-700 transition-colors">
+                        <i data-lucide="instagram" class="w-5 h-5 text-sage-400 group-hover:text-white"></i>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="font-medium text-white">Instagram</span>
+                        <span class="text-xs text-sage-400 group-hover:text-sage-200 transition-colors">@biltoa</span>
+                    </div>
+                </a>
+
+                <a href="https://www.facebook.com/ahmad.bilto/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-4 p-5 bg-sage-800/30 hover:bg-sage-800 rounded-2xl transition-all duration-300 border border-sage-800 hover:border-sage-600 group hover:-translate-y-1">
+                    <div class="p-2 bg-sage-900 rounded-lg group-hover:bg-sage-700 transition-colors">
+                        <i data-lucide="facebook" class="w-5 h-5 text-sage-400 group-hover:text-white"></i>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="font-medium text-white">Facebook</span>
+                        <span class="text-xs text-sage-400 group-hover:text-sage-200 transition-colors">Ahmad Bilto</span>
+                    </div>
+                </a>
+
+                <a href="https://biltoa.itch.io/" target="_blank" rel="noopener noreferrer" class="flex items-center gap-4 p-5 bg-sage-800/30 hover:bg-sage-800 rounded-2xl transition-all duration-300 border border-sage-800 hover:border-sage-600 group hover:-translate-y-1">
+                    <div class="p-2 bg-sage-900 rounded-lg group-hover:bg-sage-700 transition-colors">
+                        <i data-lucide="gamepad-2" class="w-5 h-5 text-sage-400 group-hover:text-white"></i>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="font-medium text-white">Itch.io</span>
+                        <span class="text-xs text-sage-400 group-hover:text-sage-200 transition-colors">biltoa.itch.io</span>
+                    </div>
+                </a>
+               </div>
+            </div>
+          </div>
+  
+          <div class="border-t border-sage-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-sage-500">
+            <p class="font-display font-bold text-2xl tracking-tighter text-white z-50 relative">
+              AB.
+            </p>
+            <p>&copy; 2025 Ahmad Bilto. All rights reserved.</p>
+          </div>
+        </div>
+    </footer>
+
+    <!-- Scroll To Top Button -->
+    <button id="scrollTopBtn" onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="fixed bottom-8 right-8 z-40 p-3 rounded-full bg-sage-500 text-white shadow-lg shadow-sage-900/30 hover:bg-sage-400 hover:-translate-y-1 transition-all duration-300 focus:outline-none opacity-0 pointer-events-none transform translate-y-10">
+        <i data-lucide="arrow-up" class="w-6 h-6"></i>
+    </button>
+
+    <!-- Lightbox Modal -->
+    <div id="lightbox" class="fixed inset-0 z-[60] bg-stone-900/95 backdrop-blur-sm hidden items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]" onclick="closeLightbox()">
+        <button onclick="closeLightbox()" class="absolute top-6 right-6 p-2 bg-white/10 rounded-full text-white/70 hover:text-white hover:bg-white/20 transition-all z-50">
+            <i data-lucide="x" class="w-8 h-8"></i>
+        </button>
+        
+        <div class="max-w-6xl max-h-[90vh] relative flex flex-col items-center" onclick="event.stopPropagation()">
+            <img id="lightbox-img" src="" alt="" class="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+            <p id="lightbox-caption" class="text-stone-300 mt-4 font-light tracking-wide text-lg"></p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        // Navbar Scroll Effect
+        const navbar = document.getElementById('navbar');
+        const navLinks = document.querySelectorAll('.nav-link');
+        const logo = document.querySelector('.font-display');
+        const menuBtn = document.getElementById('menu-btn');
+        const scrollTopBtn = document.getElementById('scrollTopBtn');
+
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 50) {
+                navbar.classList.add('bg-sage-900/90', 'backdrop-blur-md', 'shadow-lg', 'py-4');
+                navbar.classList.remove('bg-transparent', 'py-6');
+                scrollTopBtn.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-10');
+            } else {
+                navbar.classList.add('bg-transparent', 'py-6');
+                navbar.classList.remove('bg-sage-900/90', 'backdrop-blur-md', 'shadow-lg', 'py-4');
+                scrollTopBtn.classList.add('opacity-0', 'pointer-events-none', 'translate-y-10');
+            }
+        });
+
+        // Mobile Menu Toggle
+        const mobileMenu = document.getElementById('mobile-menu');
+        const mobileLinks = document.querySelectorAll('.mobile-link');
+        let isMenuOpen = false;
+
+        menuBtn.addEventListener('click', () => {
+            isMenuOpen = !isMenuOpen;
+            if (isMenuOpen) {
+                mobileMenu.classList.remove('opacity-0', 'pointer-events-none');
+                mobileMenu.querySelector('div').classList.remove('scale-95');
+                menuBtn.innerHTML = '<i data-lucide="x" class="w-7 h-7"></i>';
+                lucide.createIcons();
+            } else {
+                mobileMenu.classList.add('opacity-0', 'pointer-events-none');
+                mobileMenu.querySelector('div').classList.add('scale-95');
+                menuBtn.innerHTML = '<i data-lucide="menu" class="w-7 h-7"></i>';
+                lucide.createIcons();
+            }
+        });
+
+        mobileLinks.forEach(link => {
+            link.addEventListener('click', () => {
+                isMenuOpen = false;
+                mobileMenu.classList.add('opacity-0', 'pointer-events-none');
+                menuBtn.innerHTML = '<i data-lucide="menu" class="w-7 h-7"></i>';
+                lucide.createIcons();
+            });
+        });
+
+        // Lightbox Functions
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        const lightboxCaption = document.getElementById('lightbox-caption');
+
+        function openLightbox(url, title) {
+            lightboxImg.src = url;
+            lightboxImg.alt = title;
+            lightboxCaption.textContent = title;
+            lightbox.classList.remove('hidden');
+            lightbox.classList.add('flex');
+            document.body.classList.add('lightbox-open');
+        }
+
+        function closeLightbox() {
+            lightbox.classList.add('hidden');
+            lightbox.classList.remove('flex');
+            document.body.classList.remove('lightbox-open');
+            // Slight delay to clear src prevents flicker next open
+            setTimeout(() => {
+                lightboxImg.src = '';
+            }, 200);
+        }
+
+        // Close on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        // 404 Redirect Logic - Check for invalid hash routes
+        const validRoutes = ['home', 'games', 'skills', 'gallery', 'contact'];
+        
+        function checkRoute() {
+            const hash = window.location.hash.substring(1); // Remove the #
+            
+            // If there's a hash and it's not a valid route, redirect to 404
+            if (hash && !validRoutes.includes(hash)) {
+                window.location.href = '404.html';
+                return;
+            }
+            
+            // If hash is empty or valid, check if the element exists
+            if (hash && validRoutes.includes(hash)) {
+                const element = document.getElementById(hash);
+                if (!element) {
+                    window.location.href = '404.html';
+                    return;
+                }
+            }
+        }
+
+        // Check route on page load
+        checkRoute();
+
+        // Check route when hash changes
+        window.addEventListener('hashchange', checkRoute);
+
+        // Handle broken internal links
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('a[href^="#"]');
+            if (link) {
+                const hash = link.getAttribute('href').substring(1);
+                if (hash && !validRoutes.includes(hash)) {
+                    e.preventDefault();
+                    window.location.href = '404.html';
+                } else if (hash && validRoutes.includes(hash)) {
+                    // Check if element exists before allowing navigation
+                    const element = document.getElementById(hash);
+                    if (!element) {
+                        e.preventDefault();
+                        window.location.href = '404.html';
+                    }
+                }
+            }
+        });
+    </script>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
