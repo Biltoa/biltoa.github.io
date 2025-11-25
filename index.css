@@ -54,3 +54,14 @@
 * {
   font-family: "Homenaje", sans-serif !important;
 }
+
+@media (max-width: 768px) {
+        .animate-bounce {
+          bottom: -1px !important; 
+          left: 0 !important;
+          right: 0 !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          width: fit-content !important; 
+        }
+      }
