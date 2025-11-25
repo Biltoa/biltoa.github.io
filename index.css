@@ -55,6 +55,14 @@
   font-family: "Homenaje", sans-serif !important;
 }
 
+@media(max-width: 450px)
+{
+  #hero-text
+  {
+    font-size: 16px !important;
+  }
+}
+
 @media (max-width: 768px) {
         .animate-bounce {
           bottom: -1px !important; 
@@ -64,4 +72,5 @@
           margin-right: auto !important;
           width: fit-content !important; 
         }
+
       }
