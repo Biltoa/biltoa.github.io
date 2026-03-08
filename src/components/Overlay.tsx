@@ -29,14 +29,17 @@ export default function Overlay() {
             Building immersive worlds, multiplayer systems, and high-performance game physics for the next generation of interactive experiences.
           </p>
           
-          <motion.button 
+          <motion.a 
+            href="/Resume.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             className="group relative inline-flex items-center gap-2 md:gap-3 bg-white/10 border border-white/20 backdrop-blur-md text-white font-medium py-3 px-6 md:py-3 md:px-8 rounded-full overflow-hidden shadow-lg text-sm md:text-base transition-colors hover:bg-white/20"
           >
             <Download className="w-4 h-4 md:w-5 md:h-5 text-yellow-400" />
             <span>Download Resume</span>
-          </motion.button>
+          </motion.a>
         </motion.div>
       </section>
       
