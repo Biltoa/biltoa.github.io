@@ -9,7 +9,12 @@ export default function App() {
   return (
     <div className="w-full h-screen bg-[#ffecd2] overflow-hidden relative">
       <CustomLoader />
-      <Canvas shadows className="absolute inset-0 z-0">
+      <Canvas 
+        shadows 
+        className="absolute inset-0 z-0"
+        dpr={[1, 1.5]} // Cap pixel ratio for mobile performance
+        gl={{ powerPreference: "high-performance", antialias: false }} // Optimize WebGL context
+      >
         <color attach="background" args={['#ffecd2']} />
         <fog attach="fog" args={['#ffecd2', 20, 100]} />
         
