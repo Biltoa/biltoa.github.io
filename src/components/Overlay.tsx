@@ -128,10 +128,10 @@ export default function Overlay() {
             ].map((project, i) => (
               <motion.div 
                 key={project.title}
-                initial={{ opacity: 0, x: 50 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.2, duration: 0.6 }}
-                whileHover={{ scale: 1.02, x: -10 }}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1, duration: 0.5 }}
+                whileHover={{ scale: 1.02 }}
                 className="bg-black/80 p-4 md:p-8 rounded-2xl md:rounded-3xl backdrop-blur-2xl border border-white/10 hover:border-yellow-500/50 transition-all cursor-pointer group shadow-2xl relative overflow-hidden"
               >
                 <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500 transform origin-bottom scale-y-0 group-hover:scale-y-100 transition-transform duration-300" />
