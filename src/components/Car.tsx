@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 
-export default function Car({ steeringRef, isMobile }: { steeringRef?: React.MutableRefObject<number>, isMobile?: boolean }) {
+export default function Car({ steeringRef, isMobile, isLowEnd }: { steeringRef?: React.MutableRefObject<number>, isMobile?: boolean, isLowEnd?: boolean }) {
   const carRef = useRef<THREE.Group>(null);
   // Using custom GLTF car model
   const { scene } = useGLTF('/Car.gltf');
@@ -19,12 +19,12 @@ export default function Car({ steeringRef, isMobile }: { steeringRef?: React.Mut
       
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
-        // 6. Conditional Mobile Mode: No shadows on mobile
-        mesh.castShadow = !isMobile;
-        mesh.receiveShadow = !isMobile;
+        // 6. Conditional Mobile Mode: No shadows on low-end
+        mesh.castShadow = !isLowEnd;
+        mesh.receiveShadow = !isLowEnd;
         
-        // 2. Reduce GPU Load: Simplify materials on mobile
-        if (isMobile && mesh.material instanceof THREE.MeshStandardMaterial) {
+        // 2. Reduce GPU Load: Simplify materials on low-end
+        if (isLowEnd && mesh.material instanceof THREE.MeshStandardMaterial) {
           mesh.material.envMapIntensity = 0.5;
           mesh.material.needsUpdate = true;
         } else if (mesh.material instanceof THREE.MeshStandardMaterial) {
@@ -34,7 +34,7 @@ export default function Car({ steeringRef, isMobile }: { steeringRef?: React.Mut
       }
     });
     return w;
-  }, [scene, isMobile]);
+  }, [scene, isLowEnd]);
 
   useFrame((state, delta) => {
     // 5. Animation Optimization: Skip some updates if delta is too large (lag spike)

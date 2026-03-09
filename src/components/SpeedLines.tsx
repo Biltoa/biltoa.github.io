@@ -2,9 +2,9 @@ import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-export default function SpeedLines({ isMobile }: { isMobile?: boolean }) {
+export default function SpeedLines({ isMobile, isLowEnd }: { isMobile?: boolean, isLowEnd?: boolean }) {
   // 7. Particle Optimization: Reduce count
-  const count = isMobile ? 50 : 150;
+  const count = isLowEnd ? 50 : 150;
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
@@ -51,7 +51,7 @@ export default function SpeedLines({ isMobile }: { isMobile?: boolean }) {
     // 8. Memory and Draw Calls: Use InstancedMesh
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshBasicMaterial color="#ffffff" transparent opacity={isMobile ? 0.15 : 0.3} />
+      <meshBasicMaterial color="#ffffff" transparent opacity={isLowEnd ? 0.15 : 0.3} />
     </instancedMesh>
   );
 }

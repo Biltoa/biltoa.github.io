@@ -6,11 +6,12 @@ interface SmokeProps {
   driftIntensityRef: React.MutableRefObject<number>;
   velocityXRef: React.MutableRefObject<number>;
   isMobile?: boolean;
+  isLowEnd?: boolean;
 }
 
-export default function Smoke({ driftIntensityRef, velocityXRef, isMobile }: SmokeProps) {
+export default function Smoke({ driftIntensityRef, velocityXRef, isMobile, isLowEnd }: SmokeProps) {
   // 7. Particle Optimization: Reduce particle count for smoke
-  const count = isMobile ? 30 : 100;
+  const count = isLowEnd ? 30 : (isMobile ? 60 : 100);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   
@@ -35,8 +36,8 @@ export default function Smoke({ driftIntensityRef, velocityXRef, isMobile }: Smo
     const intensity = driftIntensityRef.current;
     const carVelX = velocityXRef.current;
 
-    // Skip updates if not drifting and mobile
-    if (isMobile && intensity < 0.05) {
+    // Skip updates if not drifting and low-end
+    if (isLowEnd && intensity < 0.05) {
       meshRef.current.visible = false;
       return;
     } else {
@@ -85,9 +86,9 @@ export default function Smoke({ driftIntensityRef, velocityXRef, isMobile }: Smo
     // 8. Memory and Draw Calls: Use InstancedMesh
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
       {/* 2. Reduce GPU Load: Reduce geometry polygon count */}
-      <sphereGeometry args={[0.5, isMobile ? 4 : 8, isMobile ? 4 : 8]} />
-      {/* 2. Replace complex materials: Use MeshBasicMaterial on mobile */}
-      {isMobile ? (
+      <sphereGeometry args={[0.5, isLowEnd ? 4 : 8, isLowEnd ? 4 : 8]} />
+      {/* 2. Replace complex materials: Use MeshBasicMaterial on low-end */}
+      {isLowEnd ? (
         <meshBasicMaterial color="#e0e0e0" transparent opacity={0.2} depthWrite={false} />
       ) : (
         <meshStandardMaterial color="#e0e0e0" transparent opacity={0.2} depthWrite={false} />

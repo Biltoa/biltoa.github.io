@@ -8,7 +8,7 @@ import Smoke from './Smoke';
 import EnvironmentScene from './EnvironmentScene';
 import SpeedLines from './SpeedLines';
 
-export default function Scene({ isMobile }: { isMobile: boolean }) {
+export default function Scene({ isMobile, isLowEnd }: { isMobile: boolean, isLowEnd: boolean }) {
   const scroll = useScroll();
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
   const cameraGroupRef = useRef<THREE.Group>(null);
@@ -114,33 +114,33 @@ export default function Scene({ isMobile }: { isMobile: boolean }) {
   return (
     <>
       {/* 3. Lighting Optimization */}
-      <ambientLight intensity={isMobile ? 0.8 : 0.6} color="#ffedd5" />
+      <ambientLight intensity={isLowEnd ? 0.8 : 0.6} color="#ffedd5" />
       <directionalLight 
         position={[100, 50, -50]} 
-        intensity={isMobile ? 2 : 3} 
+        intensity={isLowEnd ? 2 : 3} 
         color="#ffffff" 
-        castShadow={!isMobile} // Disable shadows on mobile
-        shadow-mapSize={isMobile ? [512, 512] : [1024, 1024]} // Reduce shadow map size
+        castShadow={!isLowEnd} // Disable shadows on low-end
+        shadow-mapSize={isLowEnd ? [512, 512] : [1024, 1024]} // Reduce shadow map size
       />
-      {!isMobile && <directionalLight position={[-50, 20, 50]} intensity={1} color="#fed7aa" />}
+      {!isLowEnd && <directionalLight position={[-50, 20, 50]} intensity={1} color="#fed7aa" />}
       
       <group ref={cameraGroupRef}>
         <PerspectiveCamera ref={cameraRef} makeDefault position={[0, 0, 0]} fov={50} />
       </group>
 
       <group ref={carGroupRef}>
-        <Car steeringRef={steeringRef} isMobile={isMobile} />
-        <Smoke driftIntensityRef={driftIntensityRef} velocityXRef={velocityXRef} isMobile={isMobile} />
+        <Car steeringRef={steeringRef} isMobile={isMobile} isLowEnd={isLowEnd} />
+        <Smoke driftIntensityRef={driftIntensityRef} velocityXRef={velocityXRef} isMobile={isMobile} isLowEnd={isLowEnd} />
       </group>
 
-      <SpeedLines isMobile={isMobile} />
-      <EnvironmentScene isMobile={isMobile} />
+      <SpeedLines isMobile={isMobile} isLowEnd={isLowEnd} />
+      <EnvironmentScene isMobile={isMobile} isLowEnd={isLowEnd} />
       
       {/* 4. Texture Optimization: Reduce environment map resolution */}
-      <Environment preset="sunset" resolution={isMobile ? 128 : 256} />
+      <Environment preset="sunset" resolution={isLowEnd ? 128 : 256} />
 
-      {/* 2. Reduce GPU Load: Remove Bloom on mobile */}
-      {!isMobile && (
+      {/* 2. Reduce GPU Load: Remove Bloom on low-end */}
+      {!isLowEnd && (
         <EffectComposer disableNormalPass multisampling={0}>
           <Bloom luminanceThreshold={1.2} luminanceSmoothing={0.9} height={300} intensity={0.5} />
         </EffectComposer>
