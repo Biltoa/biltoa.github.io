@@ -8,7 +8,7 @@ interface SmokeProps {
 }
 
 export default function Smoke({ driftIntensityRef, velocityXRef }: SmokeProps) {
-  const count = 200; // Increased particle count for thicker smoke
+  const count = 100; // Reduced from 200 for mobile performance
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   
@@ -73,7 +73,7 @@ export default function Smoke({ driftIntensityRef, velocityXRef }: SmokeProps) {
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[0.5, 16, 16]} />
+      <sphereGeometry args={[0.5, 8, 8]} /> {/* Reduced segments from 16 to 8 */}
       <meshStandardMaterial color="#e0e0e0" transparent opacity={0.2} depthWrite={false} />
     </instancedMesh>
   );

@@ -116,7 +116,7 @@ export default function Scene() {
         intensity={3} 
         color="#ffffff" 
         castShadow 
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]} // Reduced from 2048 for mobile performance
       />
       <directionalLight position={[-50, 20, 50]} intensity={1} color="#fed7aa" />
       
@@ -132,9 +132,9 @@ export default function Scene() {
       <SpeedLines />
       <EnvironmentScene />
       
-      <Environment preset="sunset" />
+      <Environment preset="sunset" resolution={256} />
 
-      <EffectComposer disableNormalPass multisampling={4}>
+      <EffectComposer disableNormalPass multisampling={0}>
         <Bloom luminanceThreshold={1.2} luminanceSmoothing={0.9} height={300} intensity={0.5} />
       </EffectComposer>
     </>
