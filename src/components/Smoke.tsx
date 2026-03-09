@@ -5,10 +5,12 @@ import * as THREE from 'three';
 interface SmokeProps {
   driftIntensityRef: React.MutableRefObject<number>;
   velocityXRef: React.MutableRefObject<number>;
+  isMobile?: boolean;
 }
 
-export default function Smoke({ driftIntensityRef, velocityXRef }: SmokeProps) {
-  const count = 100; // Reduced from 200 for mobile performance
+export default function Smoke({ driftIntensityRef, velocityXRef, isMobile }: SmokeProps) {
+  // 7. Particle Optimization: Reduce particle count for smoke
+  const count = isMobile ? 30 : 100;
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   
@@ -28,10 +30,18 @@ export default function Smoke({ driftIntensityRef, velocityXRef }: SmokeProps) {
   useFrame((state, delta) => {
     if (!meshRef.current) return;
     
-    // Cap delta
+    // 5. Animation Optimization: Cap delta
     const dt = Math.min(delta, 0.1);
     const intensity = driftIntensityRef.current;
     const carVelX = velocityXRef.current;
+
+    // Skip updates if not drifting and mobile
+    if (isMobile && intensity < 0.05) {
+      meshRef.current.visible = false;
+      return;
+    } else {
+      meshRef.current.visible = true;
+    }
 
     particles.forEach((p, i) => {
       p.life -= dt * 2.0; // Faster lifecycle
@@ -72,9 +82,16 @@ export default function Smoke({ driftIntensityRef, velocityXRef }: SmokeProps) {
   });
 
   return (
+    // 8. Memory and Draw Calls: Use InstancedMesh
     <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[0.5, 8, 8]} /> {/* Reduced segments from 16 to 8 */}
-      <meshStandardMaterial color="#e0e0e0" transparent opacity={0.2} depthWrite={false} />
+      {/* 2. Reduce GPU Load: Reduce geometry polygon count */}
+      <sphereGeometry args={[0.5, isMobile ? 4 : 8, isMobile ? 4 : 8]} />
+      {/* 2. Replace complex materials: Use MeshBasicMaterial on mobile */}
+      {isMobile ? (
+        <meshBasicMaterial color="#e0e0e0" transparent opacity={0.2} depthWrite={false} />
+      ) : (
+        <meshStandardMaterial color="#e0e0e0" transparent opacity={0.2} depthWrite={false} />
+      )}
     </instancedMesh>
   );
 }

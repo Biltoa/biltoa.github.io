@@ -6,8 +6,11 @@ import * as THREE from 'three';
 const SEGMENT_LENGTH = 40;
 const NUM_SEGMENTS = 30;
 
-export default function EnvironmentScene() {
+export default function EnvironmentScene({ isMobile }: { isMobile?: boolean }) {
   const segmentsRef = useRef<THREE.Group[]>([]);
+
+  // 6. Conditional Mobile Mode: Fewer segments
+  const NUM_SEGMENTS = isMobile ? 15 : 30;
 
   // Pre-generate random rock data so it doesn't change on re-renders
   const rockData = useMemo(() => {
@@ -27,7 +30,7 @@ export default function EnvironmentScene() {
         scale: Math.random() * 2 + 1
       } : null,
     }));
-  }, []);
+  }, [NUM_SEGMENTS]);
 
   useFrame((state, delta) => {
     const speed = 120;
@@ -48,16 +51,25 @@ export default function EnvironmentScene() {
     <group>
       <Sky sunPosition={[100, 20, -100]} turbidity={0.3} rayleigh={1.5} mieCoefficient={0.005} mieDirectionalG={0.7} />
 
+      {/* 2. Replace complex materials: Use BasicMaterial for road and terrain on mobile */}
       {/* Dry Asphalt Road */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow={!isMobile}>
         <planeGeometry args={[16, 2000]} />
-        <meshStandardMaterial color="#2a2a2a" roughness={0.9} metalness={0.1} />
+        {isMobile ? (
+          <meshBasicMaterial color="#2a2a2a" />
+        ) : (
+          <meshStandardMaterial color="#2a2a2a" roughness={0.9} metalness={0.1} />
+        )}
       </mesh>
 
       {/* Desert Terrain */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]} receiveShadow={!isMobile}>
         <planeGeometry args={[2000, 2000]} />
-        <meshStandardMaterial color="#d2b48c" roughness={1} metalness={0} />
+        {isMobile ? (
+          <meshBasicMaterial color="#d2b48c" />
+        ) : (
+          <meshStandardMaterial color="#d2b48c" roughness={1} metalness={0} />
+        )}
       </mesh>
 
       {/* Infinite Track Elements */}
@@ -73,32 +85,33 @@ export default function EnvironmentScene() {
             {/* Center Dashed Line */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
               <planeGeometry args={[0.3, 10]} />
-              <meshStandardMaterial color="#eebb00" roughness={0.9} />
+              {isMobile ? <meshBasicMaterial color="#eebb00" /> : <meshStandardMaterial color="#eebb00" roughness={0.9} />}
             </mesh>
 
             {/* Left Border Line */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-7.5, 0.01, 0]}>
               <planeGeometry args={[0.2, SEGMENT_LENGTH]} />
-              <meshStandardMaterial color="#ffffff" roughness={0.9} />
+              {isMobile ? <meshBasicMaterial color="#ffffff" /> : <meshStandardMaterial color="#ffffff" roughness={0.9} />}
             </mesh>
 
             {/* Right Border Line */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[7.5, 0.01, 0]}>
               <planeGeometry args={[0.2, SEGMENT_LENGTH]} />
-              <meshStandardMaterial color="#ffffff" roughness={0.9} />
+              {isMobile ? <meshBasicMaterial color="#ffffff" /> : <meshStandardMaterial color="#ffffff" roughness={0.9} />}
             </mesh>
 
             {/* Random Desert Rocks */}
             {data.leftRock && (
-              <mesh position={[data.leftRock.x, data.leftRock.y, data.leftRock.z]} castShadow receiveShadow rotation={data.leftRock.rot}>
-                <dodecahedronGeometry args={[data.leftRock.scale]} />
-                <meshStandardMaterial color="#a08060" roughness={0.9} />
+              <mesh position={[data.leftRock.x, data.leftRock.y, data.leftRock.z]} castShadow={!isMobile} receiveShadow={!isMobile} rotation={data.leftRock.rot}>
+                {/* 2. Reduce geometry polygon count */}
+                <dodecahedronGeometry args={[data.leftRock.scale, isMobile ? 0 : 1]} />
+                {isMobile ? <meshLambertMaterial color="#a08060" /> : <meshStandardMaterial color="#a08060" roughness={0.9} />}
               </mesh>
             )}
             {data.rightRock && (
-              <mesh position={[data.rightRock.x, data.rightRock.y, data.rightRock.z]} castShadow receiveShadow rotation={data.rightRock.rot}>
-                <dodecahedronGeometry args={[data.rightRock.scale]} />
-                <meshStandardMaterial color="#a08060" roughness={0.9} />
+              <mesh position={[data.rightRock.x, data.rightRock.y, data.rightRock.z]} castShadow={!isMobile} receiveShadow={!isMobile} rotation={data.rightRock.rot}>
+                <dodecahedronGeometry args={[data.rightRock.scale, isMobile ? 0 : 1]} />
+                {isMobile ? <meshLambertMaterial color="#a08060" /> : <meshStandardMaterial color="#a08060" roughness={0.9} />}
               </mesh>
             )}
           </group>

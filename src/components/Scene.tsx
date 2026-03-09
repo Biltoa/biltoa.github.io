@@ -8,7 +8,7 @@ import Smoke from './Smoke';
 import EnvironmentScene from './EnvironmentScene';
 import SpeedLines from './SpeedLines';
 
-export default function Scene() {
+export default function Scene({ isMobile }: { isMobile: boolean }) {
   const scroll = useScroll();
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
   const cameraGroupRef = useRef<THREE.Group>(null);
@@ -26,7 +26,7 @@ export default function Scene() {
   const velocityXRef = useRef(0);
 
   useFrame((state, delta) => {
-    // Cap delta to prevent physics explosions on lag spikes
+    // 5. Animation Optimization: Cap delta and reduce math operations
     const dt = Math.min(delta, 0.1);
     const offset = scroll.offset;
 
@@ -84,7 +84,7 @@ export default function Scene() {
       carGroupRef.current.rotation.z = carRoll.current;
     }
 
-    // 6. Dynamic Racing Camera
+    // 6. Dynamic Racing Camera (Simplified for mobile)
     if (cameraGroupRef.current && cameraRef.current) {
       const targetCamX = carX.current * 0.6;
       const targetCamZ = 10 + driftIntensityRef.current * 2.0;
@@ -97,10 +97,13 @@ export default function Scene() {
       const targetCamYaw = carX.current * -0.02;
       cameraGroupRef.current.rotation.y = THREE.MathUtils.lerp(cameraGroupRef.current.rotation.y, targetCamYaw, dt * 5.0);
 
-      const shakeX = (Math.random() - 0.5) * driftIntensityRef.current * 0.05;
-      const shakeY = (Math.random() - 0.5) * driftIntensityRef.current * 0.05;
-      cameraGroupRef.current.position.x += shakeX;
-      cameraGroupRef.current.position.y += shakeY;
+      // Reduce camera shake on mobile to save calculations
+      if (!isMobile) {
+        const shakeX = (Math.random() - 0.5) * driftIntensityRef.current * 0.05;
+        const shakeY = (Math.random() - 0.5) * driftIntensityRef.current * 0.05;
+        cameraGroupRef.current.position.x += shakeX;
+        cameraGroupRef.current.position.y += shakeY;
+      }
 
       const targetFov = 50 + driftIntensityRef.current * 15;
       cameraRef.current.fov = THREE.MathUtils.lerp(cameraRef.current.fov, targetFov, dt * 5.0);
@@ -110,33 +113,38 @@ export default function Scene() {
 
   return (
     <>
-      <ambientLight intensity={0.6} color="#ffedd5" />
+      {/* 3. Lighting Optimization */}
+      <ambientLight intensity={isMobile ? 0.8 : 0.6} color="#ffedd5" />
       <directionalLight 
         position={[100, 50, -50]} 
-        intensity={3} 
+        intensity={isMobile ? 2 : 3} 
         color="#ffffff" 
-        castShadow 
-        shadow-mapSize={[1024, 1024]} // Reduced from 2048 for mobile performance
+        castShadow={!isMobile} // Disable shadows on mobile
+        shadow-mapSize={isMobile ? [512, 512] : [1024, 1024]} // Reduce shadow map size
       />
-      <directionalLight position={[-50, 20, 50]} intensity={1} color="#fed7aa" />
+      {!isMobile && <directionalLight position={[-50, 20, 50]} intensity={1} color="#fed7aa" />}
       
       <group ref={cameraGroupRef}>
         <PerspectiveCamera ref={cameraRef} makeDefault position={[0, 0, 0]} fov={50} />
       </group>
 
       <group ref={carGroupRef}>
-        <Car steeringRef={steeringRef} />
-        <Smoke driftIntensityRef={driftIntensityRef} velocityXRef={velocityXRef} />
+        <Car steeringRef={steeringRef} isMobile={isMobile} />
+        <Smoke driftIntensityRef={driftIntensityRef} velocityXRef={velocityXRef} isMobile={isMobile} />
       </group>
 
-      <SpeedLines />
-      <EnvironmentScene />
+      <SpeedLines isMobile={isMobile} />
+      <EnvironmentScene isMobile={isMobile} />
       
-      <Environment preset="sunset" resolution={256} />
+      {/* 4. Texture Optimization: Reduce environment map resolution */}
+      <Environment preset="sunset" resolution={isMobile ? 128 : 256} />
 
-      <EffectComposer disableNormalPass multisampling={0}>
-        <Bloom luminanceThreshold={1.2} luminanceSmoothing={0.9} height={300} intensity={0.5} />
-      </EffectComposer>
+      {/* 2. Reduce GPU Load: Remove Bloom on mobile */}
+      {!isMobile && (
+        <EffectComposer disableNormalPass multisampling={0}>
+          <Bloom luminanceThreshold={1.2} luminanceSmoothing={0.9} height={300} intensity={0.5} />
+        </EffectComposer>
+      )}
     </>
   );
 }
