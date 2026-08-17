@@ -1693,9 +1693,14 @@ export function Haze({ center = [0, 0] as [number, number] }) {
 export function Campfire({
   position = [0, 0, 0] as [number, number, number],
   scale = 1,
+  // LIGHTING-REWORK (2026-08-17): optional external ref, so the debug panel
+  // (?debug) can bind live intensity/distance controls to the actual light
+  // instance rather than to the NIGHT/FIRELIGHT constants that built it.
+  lightRef,
 }: {
   position?: [number, number, number]
   scale?: number
+  lightRef?: React.RefObject<THREE.PointLight | null>
 }) {
   const glowTex = useMemo(() => makeGlowTexture('rgba(255,226,160,1)', 'rgba(255,150,40,0.7)'), [])
 
@@ -1856,7 +1861,10 @@ export function Campfire({
     <group position={position} scale={scale}>
       {/* The fire's light. See FIRELIGHT.key. */}
       <pointLight
-        ref={light}
+        ref={(l) => {
+          light.current = l
+          if (lightRef) lightRef.current = l
+        }}
         position={[0, 0.75, 0]}
         color={FIRELIGHT.key.color}
         intensity={FIRELIGHT.key.intensity}

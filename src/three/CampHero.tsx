@@ -30,6 +30,7 @@ import { SplitToneEffect } from './campsite/grade'
 import Book from './campsite/Book'
 import {
   Campfire,
+  FIRELIGHT,
   Fireflies,
   Haze,
   Impostors,
@@ -43,6 +44,7 @@ import {
   buildMatrices,
   rng,
 } from './campsite/Effects'
+import { debugEnabled, mountDebugPanel } from './campsite/debugPanel'
 
 /* -------------------------------------------------------------------------- */
 /*  Night lighting, in one place.                                               */
@@ -1975,9 +1977,12 @@ function CameraRig({
  * the instance is built once and handed to the composer as a primitive — the
  * standard way of putting a custom effect in an `<EffectComposer>`.
  */
-function SplitTone() {
+function SplitTone({ effectRef }: { effectRef?: React.RefObject<SplitToneEffect | null> }) {
   const effect = useMemo(() => new SplitToneEffect(), [])
-  useEffect(() => () => effect.dispose(), [effect])
+  useEffect(() => {
+    if (effectRef) effectRef.current = effect
+    return () => effect.dispose()
+  }, [effect, effectRef])
   return <primitive object={effect} dispose={null} />
 }
 
@@ -2042,6 +2047,39 @@ function Scene({
   const lastShadow = useRef(-1)
   const lastLightCheck = useRef(-1)
   const { gl } = useThree()
+
+  // LIGHTING-REWORK (2026-08-17): refs for the ?debug panel — see
+  // campsite/debugPanel.ts. Binds directly to the live objects rather than
+  // to the NIGHT constants, since mutating a plain JS constant does not
+  // itself trigger a React re-render.
+  const rimLight = useRef<THREE.DirectionalLight>(null)
+  const hemiLight = useRef<THREE.HemisphereLight>(null)
+  const ambientLightRef = useRef<THREE.AmbientLight>(null)
+  const fireKeyLight = useRef<THREE.PointLight>(null)
+  const bloomRef = useRef(null)
+  const contrastRef = useRef(null)
+  const vignetteRef = useRef(null)
+  const splitToneRef = useRef<SplitToneEffect | null>(null)
+  useEffect(() => {
+    if (!debugEnabled()) return
+    let dispose: (() => void) | undefined
+    mountDebugPanel({
+      moon: keyLight.current,
+      rim: rimLight.current,
+      hemisphere: hemiLight.current,
+      ambient: ambientLightRef.current,
+      fireKey: fireKeyLight.current,
+      bloom: bloomRef.current,
+      contrast: contrastRef.current,
+      splitTone: splitToneRef.current,
+      vignette: vignetteRef.current,
+      constants: { NIGHT, FIRELIGHT },
+    }).then((fn) => {
+      dispose = fn
+    })
+    return () => dispose?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Shadow maps are re-rendered on a timer, not per frame — see SHADOW_HZ.
   useEffect(() => {
@@ -2283,6 +2321,7 @@ function Scene({
         further back, so a rim and a key never light the same face.
       */}
       <directionalLight
+        ref={rimLight}
         position={[-16, 20, -34]}
         intensity={NIGHT.rim.intensity}
         color={NIGHT.rim.color}
@@ -2304,9 +2343,10 @@ function Scene({
         and the moon and is *meant* to be a dark navy silhouette.
       */}
       <hemisphereLight
+        ref={hemiLight}
         args={[NIGHT.hemisphere.sky, NIGHT.hemisphere.ground, NIGHT.hemisphere.intensity]}
       />
-      <ambientLight intensity={NIGHT.ambient.intensity} color={NIGHT.ambient.color} />
+      <ambientLight ref={ambientLightRef} intensity={NIGHT.ambient.intensity} color={NIGHT.ambient.color} />
 
       <Ground />
       <Impostors center={[CAMP_X, 0]} />
@@ -2323,7 +2363,7 @@ function Scene({
           ))}
         </group>
       </group>
-      <Campfire position={FIRE_POS} />
+      <Campfire position={FIRE_POS} lightRef={fireKeyLight} />
 
       {[0, 1, 2].map((i) => (
         <Tent
@@ -2426,6 +2466,7 @@ function Scene({
             still >0.9) while narrowing how far the glow reaches into the
             near-black regions. See LIGHTING_TUNING.md. */}
         <Bloom
+          ref={bloomRef}
           intensity={1.45}
           luminanceThreshold={0.87}
           luminanceSmoothing={0.11}
@@ -2505,15 +2546,15 @@ function Scene({
             the bloom tighten above, same reasoning (item b). See
             [[portfolio-post-chain-tonemapping]] before pushing this further —
             past ~0.115 it drove firelit grass's green channel through zero. */}
-        <BrightnessContrast brightness={-0.02} contrast={0.105} />
-        <SplitTone />
+        <BrightnessContrast ref={contrastRef} brightness={-0.02} contrast={0.105} />
+        <SplitTone effectRef={splitToneRef} />
         {/* Light. The corners of the reference are dark because its *sky* is
             dark there, not because a lens is closing them down — and at 0.32 /
             0.40 this pass was taking two thirds of the value off the moon,
             which sits four tenths of the way to a corner. The scene lighting
             owns the falloff now; this only stops the frame's edges competing
             with the fire. */}
-        <Vignette offset={0.50} darkness={0.26} />
+        <Vignette ref={vignetteRef} offset={0.50} darkness={0.26} />
       </EffectComposer>
       )}
     </>
