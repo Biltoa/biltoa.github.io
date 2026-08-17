@@ -107,7 +107,14 @@ const NIGHT = {
    * These sit between the two. Seven readable pools, and cold grass in the gaps
    * and at the front of frame.
    */
-  grassWarm: { fireRadius: 5.6, firePower: 1, torchRadius: 3.4, torchPower: 0.55 },
+  // LIGHTING-REWORK (2026-08-17): fireRadius 5.6->4.3. This gaussian, not the
+  // physical point light, was the main driver of the far field reading
+  // brighter than the new target reference (item c) — a shader term with no
+  // hard cutoff reaches well past where FIRELIGHT.key's distance cuts it off.
+  // LIGHTING-REWORK (2026-08-17, revised): 4.3->4.8, paired with the
+  // FIRELIGHT.key.distance revision above — same reasoning, mid-field was
+  // undershooting the new target reference.
+  grassWarm: { fireRadius: 4.8, firePower: 1.1, torchRadius: 3.4, torchPower: 0.55 },
 } as const
 
 /**
@@ -493,6 +500,38 @@ function Ground() {
       polygonOffset: true,
       polygonOffsetFactor: -2,
     })
+    // LIGHTING-REWORK (2026-08-17): this disc never got applyGroundGlow —
+    // only grassMat did. It sits directly under the fire and inside the
+    // bench ring, and imagestats' radial-falloff sampling (item c) against
+    // the new target reference showed the whole clearing floor reading much
+    // darker than target past the fire's own small additive glow quad. A
+    // flat Lambert surface with the light 0.75 units above it and mostly
+    // level with the disc gets a weak N·L term over most of the radius;
+    // this is the same warm-pool trick already proven on the grass, reusing
+    // the same WARM uniform list (fire + torches) rather than adding a light.
+    //
+    // **Bug found while wiring this up, not just a tuning change**:
+    // `applyParallax` below does `mat.onBeforeCompile = (shader) => {...}` —
+    // a bare assignment, not a chain — so calling it after `applyGroundGlow`
+    // silently discarded the glow patch entirely; the material rendered with
+    // no error and no visible warmth no matter what the glow options were.
+    // Composing the two callbacks manually here instead of reordering the
+    // calls, since reordering would just make `applyParallax` clobber the
+    // glow patch's `#include <fog_fragment>` uniforms/varying instead.
+    applyGroundGlow(m, {
+      warmColor: new THREE.Color('#ff9a55'),
+      warmGain: 0.4,
+      floor: new THREE.Color('#050302'),
+      // Registers this material on wind.ts's `patched` list, which is what
+      // gives it a live `uWarmCount` refreshed by `setWarmLights` — without
+      // an `aurora` block `applyGroundGlow` never adds it to that list, and
+      // the uniform stays frozen at whatever `warmCount` was when this
+      // material compiled (0, since it compiles before the camp's first
+      // `setWarmLights` call). A second real bug, matched to grassMat's own
+      // aurora block rather than skipped.
+      aurora: { low: AURORA_BOUNCE_LOW, mid: AURORA_BOUNCE_MID, high: AURORA_BOUNCE_HIGH, gain: 0.03 },
+    })
+    const glowCompile = m.onBeforeCompile
     // Shallower than the paving's: a rut in packed earth is a couple of
     // centimetres, not the step down between two setts.
     //
@@ -501,6 +540,12 @@ function Ground() {
     // this depth the difference between nine samples and sixteen is not visible
     // and the cost of it is.
     applyParallax(m, { depth: 0.012, steps: 9, occlusion: 0.34 })
+    const parallaxCompile = m.onBeforeCompile
+    m.onBeforeCompile = (shader, renderer) => {
+      glowCompile(shader, renderer)
+      parallaxCompile(shader, renderer)
+    }
+    m.needsUpdate = true
     return m
   }, [dirt, dirtN, walkMask])
 

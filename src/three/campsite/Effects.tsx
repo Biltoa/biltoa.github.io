@@ -27,7 +27,19 @@ export const FIRELIGHT = {
    * reach is the pool's and the near falloff is close enough to the key's that
    * nothing in the clearing moved by a visible amount.
    */
-  key: { intensity: 26, distance: 12, color: '#ffbb82' },
+  // LIGHTING-REWORK (2026-08-17): intensity 26->34, distance 12->9.5.
+  // imagestats radial-falloff sampling (item c) against the new target
+  // reference showed the core under-bright (cur 87.7 vs ref 124.1 measured
+  // luminance at r=0.03) while the mid/far field was *over*-reaching (cur
+  // brighter than ref past r=0.32) — a hotter, shorter-cutoff key moves both
+  // at once. See LIGHTING_TUNING.md.
+  // LIGHTING-REWORK (2026-08-17, revised): distance 9.5->11. First pass at
+  // 9.5 fixed the far-field overshoot (item c, r=0.32/0.45) but collapsed the
+  // mid-field too (r=0.08/0.14 undershot ref by ~45-55) — the target's hot
+  // zone is wider through the middle, only dropping steeply further out than
+  // 9.5 units covers. Splitting the difference between the original 12 and
+  // the first attempt.
+  key: { intensity: 34, distance: 11, color: '#ffbb82' },
   /** Cool and hot ends of the flame's colour swing. */
   coolEnd: /* @__PURE__ */ new THREE.Color('#ff7a24'),
   hotEnd: /* @__PURE__ */ new THREE.Color('#ffc272'),
@@ -1780,7 +1792,7 @@ export function Campfire({
 
     if (core.current) {
       const m = core.current.material as THREE.MeshBasicMaterial
-      m.opacity = 0.38 * flicker
+      m.opacity = 0.50 * flicker
       core.current.scale.setScalar(0.9 + flicker * 0.22)
       core.current.quaternion.copy(camera.quaternion)
     }
@@ -1826,7 +1838,7 @@ export function Campfire({
 
     if (groundGlow.current) {
       const m = groundGlow.current.material as THREE.MeshBasicMaterial
-      m.opacity = 0.22 * flicker
+      m.opacity = 0.30 * flicker
       groundGlow.current.scale.setScalar(1 + Math.sin(t * 3.7) * 0.03)
     }
   })
@@ -1849,13 +1861,21 @@ export function Campfire({
         shadow-camera-far={FIRELIGHT.key.distance}
       />
 
-      {/* Hot core sitting in the coals. */}
+      {/* Hot core sitting in the coals.
+          LIGHTING-REWORK (2026-08-17): opacity 0.38->0.50. This quad is
+          `toneMapped={false}`, additive — see
+          [[portfolio-post-chain-tonemapping]] — so it clamps at 1.0 whatever
+          value is written under it, and the visible brightness of the flame
+          core comes from how much of it clears the Bloom threshold, not from
+          this multiply. Raising the point light intensity (above) did not
+          move imagestats' r=0.03 sample at all, because this quad is what
+          that sample was reading, not the lit surfaces around it. */}
       <mesh ref={core} position={[0, 0.28, 0]}>
         <planeGeometry args={[1.15, 1.15]} />
         <meshBasicMaterial
           map={glowTex}
           transparent
-          opacity={0.38}
+          opacity={0.50}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
           toneMapped={false}
@@ -1865,7 +1885,9 @@ export function Campfire({
 
       {/* Pool of light on the ground under the fire. Wider than the lit disc
           of bare earth, so the glow runs out into the grass instead of stopping
-          exactly where the ground texture changes. */}
+          exactly where the ground texture changes.
+          LIGHTING-REWORK (2026-08-17): opacity 0.22->0.30, same reasoning as
+          the core quad above. */}
       <mesh ref={groundGlow} rotation-x={-Math.PI / 2} position={[0, 0.04, 0]}>
         <planeGeometry args={[9, 9]} />
         <meshBasicMaterial
