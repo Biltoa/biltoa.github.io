@@ -96,6 +96,15 @@ function makeGlowTexture(inner = 'rgba(255,236,180,1)', mid = 'rgba(255,176,60,0
   return tex
 }
 
+// LIGHTING-REWORK (2026-08-17, item e): one shared texture for all 6 torch
+// ground pools, built lazily on first use rather than per-instance — six
+// canvases for the same gradient would be six textures doing one job.
+let torchGlowTex: THREE.CanvasTexture | null = null
+function getTorchGlowTex() {
+  if (!torchGlowTex) torchGlowTex = makeGlowTexture('rgba(255,214,150,0.9)', 'rgba(255,140,40,0.55)')
+  return torchGlowTex
+}
+
 /* ------------------------------------------------------------- instancing */
 
 
@@ -2050,6 +2059,14 @@ export function TorchFlame({
   )
   useLayoutEffect(() => () => smokeMat?.dispose(), [smokeMat])
 
+  // LIGHTING-REWORK (2026-08-17, item e): torches had a point light but no
+  // ground pool of their own — the campfire's groundGlow quad has no
+  // equivalent here. imagestats showed the ground under 4 of 6 torches
+  // reading indistinguishable from the surrounding grass where the target
+  // reference has a distinct warm patch. Same technique as the campfire:
+  // one shared additive texture (torchGlowTex, below), not a new light.
+  const groundGlow = useRef<THREE.Mesh>(null)
+
   const mats = useMemo(
     () =>
       single
@@ -2134,6 +2151,10 @@ export function TorchFlame({
       smokeMat.uniforms.uTime.value = t
       smokeMat.uniforms.uLife.value = life
     }
+    if (groundGlow.current) {
+      const m = groundGlow.current.material as THREE.MeshBasicMaterial
+      m.opacity = 0.30 * flick * (lit ? (gain ? gain.current : 1) : 0)
+    }
   })
 
   return (
@@ -2167,6 +2188,28 @@ export function TorchFlame({
           distance={reach}
           decay={2}
         />
+      )}
+      {/* LIGHTING-REWORK (2026-08-17, item e): ground pool, torches only
+          (`!single` — candles are indoor/on a bench, no ground plane makes
+          sense under one). Painted, not lit: same trick as the campfire's
+          own groundGlow, at a fraction of the size and reusing one shared
+          texture across all 6 torches. */}
+      {/* This group is offset to the flame's own height (`position` prop —
+          1.66 for a torch), so the pool's local y has to cancel that back
+          out to land on the ground rather than float at flame height. */}
+      {!single && (
+        <mesh ref={groundGlow} rotation-x={-Math.PI / 2} position={[0, 0.03 - position[1], 0]}>
+          <planeGeometry args={[2.3, 2.3]} />
+          <meshBasicMaterial
+            map={getTorchGlowTex()}
+            transparent
+            opacity={0.3}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+            toneMapped={false}
+            fog={false}
+          />
+        </mesh>
       )}
     </group>
   )
