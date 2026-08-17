@@ -44,8 +44,16 @@ const FOG_CEILING = 0.24
  * that front crossed a tent it drew a line. Starting the whole term beyond the
  * camp means there is no front inside anything the eye is reading.
  */
-const FOG_NEAR = 26
-const FOG_FAR = 78
+// LIGHTING-REWORK (2026-08-17): FOG_NEAR 26->20, FOG_FAR 78->58. imagestats
+// (item f) showed the treeline and tent-roof bands both reading noticeably
+// *brighter* than the new target reference (treeline +19.9 lum, roof +13.4)
+// — not receding. The lobby camera sits at world z=14 and the tents at
+// z=-7.8 are ~22m away, so the old 26m gate left the whole near tree ring
+// (as close as ~20m) unfogged. Pulled in just past the tents, and the far
+// edge in to match — the old 78m span faded so gradually the far band never
+// reached the fog colour at all. See LIGHTING_TUNING.md.
+const FOG_NEAR = 20
+const FOG_FAR = 58
 
 let applied = false
 
