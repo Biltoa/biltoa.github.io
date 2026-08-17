@@ -88,22 +88,10 @@ const NIGHT = {
   // outer-grass corner (item a) showed a faint warm cast where the target is
   // near-neutral/cool at the same near-black luminance — this is a small,
   // low-cost push in that direction. See LIGHTING_TUNING.md.
-  // LIGHTING-REWORK (2026-08-17): ground '#ffffff' -> '#4a4238'. A pure-white
-  // ground bounce at intensity 1 is a flat white fill light hitting every
-  // upward-facing surface in the scene, with nothing to distinguish grass
-  // from dirt from tent canvas — near the fire it's swamped by the warm key
-  // light and reads fine, everywhere else (tent interiors, bare ground away
-  // from the fire, the field's background reaches) it's the dominant term
-  // and washes everything toward the same flat pale grey, reported as
-  // mismatched/whitish dirt in several unrelated spots at once. That
-  // symptom pattern (same wrongness everywhere at once, worse the further
-  // a surface is from a strong warm light) is the signature of one
-  // scene-wide term, not a set of separate material bugs — a dim warm
-  // neutral (packed-earth-ish, not saturated) keeps the "it cannot go to
-  // zero" job this term exists for (see the comment block above) without
-  // being a light source in its own right. Intensity kept at 1 — the
-  // colour was the problem, not the strength.
-  hemisphere: { sky: '#000000', ground: '#4a4238', intensity: 1 },
+  // LIGHTING-REWORK (2026-08-17): baked from ?debug — sky '#2a3050'->'#000000',
+  // ground '#070a14'->'#ffffff' (was '#d1d1d1' in an earlier bake this same
+  // session), intensity 0.23->1.
+  hemisphere: { sky: '#000000', ground: '#ffffff', intensity: 1 },
   /** The last resort against crushed black.
       LIGHTING-REWORK (2026-08-17): baked from ?debug, second pass — turned
       off (intensity 1->0) once the hemisphere alone was carrying enough. */
@@ -2497,25 +2485,14 @@ function Scene({
             the frame even at a fairly high threshold, and tightening both
             knobs cuts fewer things out (the fire core, wicks, moon are all
             still >0.9) while narrowing how far the glow reaches into the
-            near-black regions. See LIGHTING_TUNING.md.
-
-            Smoothing raised again, 0.11->0.22: the torch flames — small on
-            screen next to the campfire — showed a visibly blocky, stair-
-            stepped bloom halo, reported and reproduced (crop in the session
-            record). A hard luminance cutoff blooms a mip level's texel grid
-            almost directly onto a source that size; smoothing widens the
-            transition band so the mip chain blends instead of stair-steps.
-            This is a global knob — `postprocessing`'s Bloom has no per-
-            object scope without SelectiveBloomEffect and a render layer,
-            which is a bigger change — so it also softens the black floor
-            fix slightly. Re-measure item (b) if that matters again. */}
+            near-black regions. See LIGHTING_TUNING.md. */}
         <Bloom
           ref={bloomRef}
           intensity={1.45}
           luminanceThreshold={0.87}
-          luminanceSmoothing={0.35}
+          luminanceSmoothing={0.11}
           mipmapBlur
-          radius={0.85}
+          radius={0.62}
           levels={BLOOM_LEVELS}
         />
         {/*
