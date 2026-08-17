@@ -312,6 +312,16 @@ export function useKit() {
           amplitude: 0.16,
           speed: 0.85,
           height: 22,
+          // LIGHTING-REWORK (2026-08-17): explicit tip/root/coolGain, baked
+          // from the ?debug panel's "Trees (top/bottom gradient)" folder —
+          // top-lit-by-moon (near white), darker/greyer at the base. Without
+          // these the tree leaf material fell through to applyWind's own
+          // generic defaults ('#7d9cd6'/'#24304a'/1.2), which is what grass
+          // gets when it doesn't override them either — trees now have their
+          // own, matching grass's existing explicit block below.
+          tipTint: new THREE.Color('#ffffff'),
+          rootTint: new THREE.Color('#6b6b6b'),
+          coolGain: 1.41,
           // Firelight on the near wood.
           //
           // The point lights cannot do this: the campfire's reach is eleven

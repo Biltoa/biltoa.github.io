@@ -447,8 +447,10 @@ export function applyWind(material: THREE.Material, opts: WindOptions = {}) {
       // the user's request: top-lit-by-moon, darker at the bottom, on its
       // own tunable split point rather than the raw 0-1 model height, since
       // a canopy's foliage is not evenly distributed across that range.
-      shader.uniforms.uFoliageSplit = { value: 0.42 }
-      shader.uniforms.uFoliageSoftness = { value: 0.35 }
+      // LIGHTING-REWORK (2026-08-17): split/softness baked from the ?debug
+      // panel's "Trees (top/bottom gradient)" folder at the user's request.
+      shader.uniforms.uFoliageSplit = { value: 0.55 }
+      shader.uniforms.uFoliageSoftness = { value: 0.24 }
       TREE_CANOPY_SHADERS.push(shader as unknown as (typeof TREE_CANOPY_SHADERS)[number])
       shader.fragmentShader = shader.fragmentShader
         .replace(

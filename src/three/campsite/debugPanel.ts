@@ -70,8 +70,15 @@ export async function mountDebugPanel(handles: DebugHandles) {
   }
   if (handles.fireKey) {
     const f = gui.addFolder('Fire key light')
-    f.add(handles.fireKey, 'intensity', 0, 80, 0.5)
-    f.add(handles.fireKey, 'distance', 1, 30, 0.5)
+    // LIGHTING-REWORK (2026-08-17): binding intensity to the light ref did
+    // nothing — Campfire's useFrame recomputes `light.current.intensity =
+    // FIRELIGHT.key.intensity * flicker` every frame (Effects.tsx), which
+    // stomps any direct assignment within one frame. Bound to the actual
+    // constant the flicker formula reads from instead; `distance` isn't
+    // touched per frame, so the ref binding for it was already live.
+    const fireKeyConst = (handles.constants?.FIRELIGHT as { key: { intensity: number } } | undefined)?.key
+    if (fireKeyConst) f.add(fireKeyConst, 'intensity', 0, 150, 0.5).name('intensity (base, pre-flicker)')
+    f.add(handles.fireKey, 'distance', 1, 40, 0.5)
   }
   if (handles.bloom) {
     const f = gui.addFolder('Bloom')
