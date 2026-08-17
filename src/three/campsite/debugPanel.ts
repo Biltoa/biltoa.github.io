@@ -55,6 +55,14 @@ export async function mountDebugPanel(handles: DebugHandles) {
     const f = gui.addFolder('Rim')
     f.add(handles.rim, 'intensity', 0, 2, 0.01)
     colorCtrl(f, handles.rim, 'color')
+    // Position, not target — this is a THREE.DirectionalLight with no
+    // explicit `target` set (JSX-mounted with just `position`), so it
+    // shines at the default target (0,0,0) and only the *direction* from
+    // position to origin matters, not the distance. Sliders move the
+    // position and the light re-aims itself every frame automatically.
+    f.add(handles.rim.position, 'x', -60, 60, 0.5)
+    f.add(handles.rim.position, 'y', -20, 60, 0.5)
+    f.add(handles.rim.position, 'z', -80, 40, 0.5)
   }
   if (handles.hemisphere) {
     const f = gui.addFolder('Hemisphere')
@@ -181,7 +189,12 @@ export async function mountDebugPanel(handles: DebugHandles) {
       dump: () => {
         console.log('--- lighting values ---')
         if (handles.moon) console.log('moon', { intensity: handles.moon.intensity, color: `#${handles.moon.color.getHexString()}` })
-        if (handles.rim) console.log('rim', { intensity: handles.rim.intensity, color: `#${handles.rim.color.getHexString()}` })
+        if (handles.rim)
+          console.log('rim', {
+            intensity: handles.rim.intensity,
+            color: `#${handles.rim.color.getHexString()}`,
+            position: handles.rim.position.toArray().map((v) => Math.round(v * 10) / 10),
+          })
         if (handles.hemisphere)
           console.log('hemisphere', {
             intensity: handles.hemisphere.intensity,
