@@ -65,9 +65,13 @@ export interface SplitToneOptions {
  */
 export class SplitToneEffect extends Effect {
   constructor({
-    shadow = new THREE.Color('#2c56b4'),
+    // LIGHTING-REWORK (2026-08-17): #2c56b4/0.048 -> #2748c8/0.065. Region
+    // averages against the new target reference showed the current frame's
+    // dark end reading warmer than target at the same luminance (item a).
+    // See LIGHTING_TUNING.md.
+    shadow = new THREE.Color('#2748c8'),
     highlight = new THREE.Color('#ff9a3c'),
-    shadowAmount = 0.048,
+    shadowAmount = 0.065,
     highlightAmount = 0.06,
   }: SplitToneOptions = {}) {
     super('SplitToneEffect', FRAG, {

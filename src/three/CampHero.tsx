@@ -75,9 +75,15 @@ const NIGHT = {
    * tree the reader is looking at is turned away from the only directional
    * source in the scene. This is what keeps that face from being a hole.
    */
-  hemisphere: { sky: '#3f3c44', ground: '#0a0a08', intensity: 0.23 },
+  // LIGHTING-REWORK (2026-08-17): sky pushed from #3f3c44 (grey-warm) to a
+  // colder navy, ground from #0a0a08 to a blue-black. imagestats on the
+  // outer-grass corner (item a) showed a faint warm cast where the target is
+  // near-neutral/cool at the same near-black luminance — this is a small,
+  // low-cost push in that direction. See LIGHTING_TUNING.md.
+  hemisphere: { sky: '#2a3050', ground: '#070a14', intensity: 0.23 },
   /** The last resort against crushed black. Very small. */
-  ambient: { intensity: 0.05, color: '#22345e' },
+  // LIGHTING-REWORK (2026-08-17): #22345e -> #1c2c5c, same intensity.
+  ambient: { intensity: 0.05, color: '#1c2c5c' },
   /**
    * Depth haze. See campsite/fog.ts — this is height fog, not distance fog.
    *
