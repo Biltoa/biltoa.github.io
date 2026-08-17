@@ -3,6 +3,7 @@ import type { BloomEffect, BrightnessContrastEffect, VignetteEffect } from 'post
 import type { SplitToneEffect } from './grade'
 import { TREE_GAIN, GRASS_GAIN } from './debugGain'
 import { BARK_MATERIALS } from './useKit'
+import { TREE_CANOPY_SHADERS } from './wind'
 
 /* -------------------------------------------------------------------------- */
 /*  Lighting debug panel — lil-gui, gated behind `?debug`, lazy-imported.       */
@@ -123,6 +124,32 @@ export async function mountDebugPanel(handles: DebugHandles) {
     const f = gui.addFolder('Trees (canopy gain)')
     f.add(TREE_GAIN, 'value', 0, 3, 0.01).name('gain')
   }
+  if (TREE_CANOPY_SHADERS.length) {
+    const f = gui.addFolder('Trees (top/bottom gradient)')
+    const first = TREE_CANOPY_SHADERS[0].uniforms
+    const proxy = {
+      top: `#${first.uTipTint.value.getHexString()}`,
+      bottom: `#${first.uRootTint.value.getHexString()}`,
+      coolGain: first.uCoolGain.value,
+      split: first.uFoliageSplit.value,
+      softness: first.uFoliageSoftness.value,
+    }
+    f.addColor(proxy, 'top').name('top (moonlit) color').onChange((v: string) => {
+      for (const s of TREE_CANOPY_SHADERS) s.uniforms.uTipTint.value.set(v)
+    })
+    f.addColor(proxy, 'bottom').name('bottom (shadow) color').onChange((v: string) => {
+      for (const s of TREE_CANOPY_SHADERS) s.uniforms.uRootTint.value.set(v)
+    })
+    f.add(proxy, 'coolGain', 0, 3, 0.01).onChange((v: number) => {
+      for (const s of TREE_CANOPY_SHADERS) s.uniforms.uCoolGain.value = v
+    })
+    f.add(proxy, 'split', 0, 1, 0.01).name('split height (0=base,1=tip)').onChange((v: number) => {
+      for (const s of TREE_CANOPY_SHADERS) s.uniforms.uFoliageSplit.value = v
+    })
+    f.add(proxy, 'softness', 0.01, 0.6, 0.01).onChange((v: number) => {
+      for (const s of TREE_CANOPY_SHADERS) s.uniforms.uFoliageSoftness.value = v
+    })
+  }
   {
     const f = gui.addFolder('Grass (blades + ground, gain)')
     f.add(GRASS_GAIN, 'value', 0, 3, 0.01).name('gain')
@@ -157,6 +184,16 @@ export async function mountDebugPanel(handles: DebugHandles) {
         if (handles.ambient) console.log('ambient', { intensity: handles.ambient.intensity, color: `#${handles.ambient.color.getHexString()}` })
         if (handles.fireKey) console.log('fireKey', { intensity: handles.fireKey.intensity, distance: handles.fireKey.distance })
         console.log('treeGain', TREE_GAIN.value, 'grassGain', GRASS_GAIN.value)
+        if (TREE_CANOPY_SHADERS.length) {
+          const u = TREE_CANOPY_SHADERS[0].uniforms
+          console.log('treeCanopyGradient', {
+            top: `#${u.uTipTint.value.getHexString()}`,
+            bottom: `#${u.uRootTint.value.getHexString()}`,
+            coolGain: u.uCoolGain.value,
+            split: u.uFoliageSplit.value,
+            softness: u.uFoliageSoftness.value,
+          })
+        }
         if (BARK_MATERIALS.length)
           console.log('bark', { color: `#${BARK_MATERIALS[0].color.getHexString()}`, emissiveIntensity: BARK_MATERIALS[0].emissiveIntensity })
         if (handles.constants) console.log('constants at load (NIGHT, FIRELIGHT, ...)', handles.constants)

@@ -6,8 +6,10 @@ import * as THREE from 'three'
 /*  hemisphere/ambient (which both currently light).                           */
 /* -------------------------------------------------------------------------- */
 
-export const TREE_GAIN = { value: 1 }
-export const GRASS_GAIN = { value: 1 }
+// LIGHTING-REWORK (2026-08-17): defaults baked from the ?debug panel at the
+// user's request — treeGain 1->1.05, grassGain 1->0.68.
+export const TREE_GAIN = { value: 1.05 }
+export const GRASS_GAIN = { value: 0.68 }
 
 /**
  * Multiplies a material's final fragment colour by a live-mutable uniform.

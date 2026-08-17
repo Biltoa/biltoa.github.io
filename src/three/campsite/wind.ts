@@ -26,6 +26,22 @@ interface FoliageShader {
 
 const patched: FoliageShader[] = []
 
+/**
+ * Tree-canopy shaders only, for the `?debug` panel's top/bottom gradient
+ * controls (uTipTint/uRootTint/uFoliageSplit/uFoliageSoftness/uCoolGain) —
+ * a subset of `patched`, which also holds grass blade shaders that don't
+ * have these particular uniforms.
+ */
+export const TREE_CANOPY_SHADERS: {
+  uniforms: {
+    uTipTint: { value: THREE.Color }
+    uRootTint: { value: THREE.Color }
+    uCoolGain: { value: number }
+    uFoliageSplit: { value: number }
+    uFoliageSoftness: { value: number }
+  }
+}[] = []
+
 /* ------------------------------------------------------------ warm lights */
 
 /**
@@ -423,13 +439,38 @@ export function applyWind(material: THREE.Material, opts: WindOptions = {}) {
         is what the blade version does, would put the firelight on precisely the
         part of the wood the fire cannot see.
       */
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <fog_fragment>',
-        `gl_FragColor.rgb +=
-           uFireColor * vFoliageWarm * (0.62 + 0.38 * uFireFlicker) *
-           (0.95 - 0.62 * vFoliageH) * uWarmGain;
-         #include <fog_fragment>`
-      )
+      // LIGHTING-REWORK (2026-08-17): this branch used to skip the
+      // root/tip gradient entirely — `uRootTint`/`uTipTint` were declared
+      // (see the `firelight` uniform block above, not gated on `warmOnly`)
+      // but never multiplied in, so a tree's canopy had no top/bottom
+      // separation at all, only the additive campfire term below. Added at
+      // the user's request: top-lit-by-moon, darker at the bottom, on its
+      // own tunable split point rather than the raw 0-1 model height, since
+      // a canopy's foliage is not evenly distributed across that range.
+      shader.uniforms.uFoliageSplit = { value: 0.42 }
+      shader.uniforms.uFoliageSoftness = { value: 0.35 }
+      TREE_CANOPY_SHADERS.push(shader as unknown as (typeof TREE_CANOPY_SHADERS)[number])
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uFoliageSplit;
+           uniform float uFoliageSoftness;`
+        )
+        .replace(
+          '#include <fog_fragment>',
+          `{
+             float grad = smoothstep(
+               uFoliageSplit - uFoliageSoftness, uFoliageSplit + uFoliageSoftness, vFoliageH
+             );
+             vec3 canopyTint = mix(uRootTint * uCoolGain, uTipTint * uCoolGain, grad);
+             gl_FragColor.rgb *= canopyTint;
+           }
+           gl_FragColor.rgb +=
+             uFireColor * vFoliageWarm * (0.62 + 0.38 * uFireFlicker) *
+             (0.95 - 0.62 * vFoliageH) * uWarmGain;
+           #include <fog_fragment>`
+        )
     } else if (firelight) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <dithering_fragment>',

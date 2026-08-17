@@ -89,12 +89,13 @@ const NIGHT = {
   // near-neutral/cool at the same near-black luminance — this is a small,
   // low-cost push in that direction. See LIGHTING_TUNING.md.
   // LIGHTING-REWORK (2026-08-17): baked from ?debug — sky '#2a3050'->'#000000',
-  // ground '#070a14'->'#d1d1d1', intensity 0.23->1.
-  hemisphere: { sky: '#000000', ground: '#d1d1d1', intensity: 1 },
+  // ground '#070a14'->'#ffffff' (was '#d1d1d1' in an earlier bake this same
+  // session), intensity 0.23->1.
+  hemisphere: { sky: '#000000', ground: '#ffffff', intensity: 1 },
   /** The last resort against crushed black.
-      LIGHTING-REWORK (2026-08-17): baked from ?debug — intensity 0.05->1,
-      color '#1c2c5c'->'#ff0000'. */
-  ambient: { intensity: 1, color: '#ff0000' },
+      LIGHTING-REWORK (2026-08-17): baked from ?debug, second pass — turned
+      off (intensity 1->0) once the hemisphere alone was carrying enough. */
+  ambient: { intensity: 0, color: '#000000' },
   /**
    * Depth haze. See campsite/fog.ts — this is height fog, not distance fog.
    *
@@ -522,38 +523,17 @@ function Ground() {
       polygonOffset: true,
       polygonOffsetFactor: -2,
     })
-    // LIGHTING-REWORK (2026-08-17): this disc never got applyGroundGlow —
-    // only grassMat did. It sits directly under the fire and inside the
-    // bench ring, and imagestats' radial-falloff sampling (item c) against
-    // the new target reference showed the whole clearing floor reading much
-    // darker than target past the fire's own small additive glow quad. A
-    // flat Lambert surface with the light 0.75 units above it and mostly
-    // level with the disc gets a weak N·L term over most of the radius;
-    // this is the same warm-pool trick already proven on the grass, reusing
-    // the same WARM uniform list (fire + torches) rather than adding a light.
+    // LIGHTING-REWORK (2026-08-17): applyGroundGlow was added here earlier
+    // this session (see LIGHTING_TUNING.md for the two real bugs found while
+    // wiring it up — worth keeping as a reference if this is revisited) to
+    // brighten this disc relative to the surrounding grass. Reverted at the
+    // user's explicit request: with the much brighter light budget baked in
+    // since, the warm-pool overlay read as a second, different-looking
+    // material rather than the same dirt lit brighter, and made the parallax
+    // detail wash out to a flat orange disc. Plain dirt + normal map +
+    // parallax again, same as every other ground surface in the scene — one
+    // material, lit only by the real lights in the scene.
     //
-    // **Bug found while wiring this up, not just a tuning change**:
-    // `applyParallax` below does `mat.onBeforeCompile = (shader) => {...}` —
-    // a bare assignment, not a chain — so calling it after `applyGroundGlow`
-    // silently discarded the glow patch entirely; the material rendered with
-    // no error and no visible warmth no matter what the glow options were.
-    // Composing the two callbacks manually here instead of reordering the
-    // calls, since reordering would just make `applyParallax` clobber the
-    // glow patch's `#include <fog_fragment>` uniforms/varying instead.
-    applyGroundGlow(m, {
-      warmColor: new THREE.Color('#ff9a55'),
-      warmGain: 0.4,
-      floor: new THREE.Color('#050302'),
-      // Registers this material on wind.ts's `patched` list, which is what
-      // gives it a live `uWarmCount` refreshed by `setWarmLights` — without
-      // an `aurora` block `applyGroundGlow` never adds it to that list, and
-      // the uniform stays frozen at whatever `warmCount` was when this
-      // material compiled (0, since it compiles before the camp's first
-      // `setWarmLights` call). A second real bug, matched to grassMat's own
-      // aurora block rather than skipped.
-      aurora: { low: AURORA_BOUNCE_LOW, mid: AURORA_BOUNCE_MID, high: AURORA_BOUNCE_HIGH, gain: 0.03 },
-    })
-    const glowCompile = m.onBeforeCompile
     // Shallower than the paving's: a rut in packed earth is a couple of
     // centimetres, not the step down between two setts.
     //
@@ -562,12 +542,6 @@ function Ground() {
     // this depth the difference between nine samples and sixteen is not visible
     // and the cost of it is.
     applyParallax(m, { depth: 0.012, steps: 9, occlusion: 0.34 })
-    const parallaxCompile = m.onBeforeCompile
-    m.onBeforeCompile = (shader, renderer) => {
-      glowCompile(shader, renderer)
-      parallaxCompile(shader, renderer)
-    }
-    m.needsUpdate = true
     return m
   }, [dirt, dirtN, walkMask])
 
@@ -1400,8 +1374,20 @@ function Tent({
     // specular at all, so the rim light passed straight over the folds and
     // every wall came out as one flat panel of colour; a little sheen is what
     // makes the seams and the sag read.
+    //
+    // LIGHTING-REWORK (2026-08-17): 0.74 -> 0.9. That note was written
+    // against rim 0.62/moon 1.55 — at the much brighter values now baked in
+    // (moon 4, rim 2, hemisphere ground '#ffffff' @ 1.0), the same 0.74
+    // roughness put a blown-white Fresnel highlight on any grazing-angle
+    // surface — thin guy-ropes especially, reported as "metallic white
+    // streaks" and reproduced with moon/rim off (hemisphere + the much
+    // stronger campfire light alone are enough). Metalness is 0 on this
+    // material (checked the source glb) — this was never a metal-material
+    // bug, just a specular lobe sized for a dimmer scene. Some sheen is kept
+    // (not the flat 0.92) since the light budget here really is that much
+    // higher now.
     const list = tintParts(kit.parts(TENT.node), TENT_TINT[index], {
-      roughness: 0.74,
+      roughness: 0.9,
       side: THREE.DoubleSide,
       emissive: new THREE.Color('#000000'),
     })

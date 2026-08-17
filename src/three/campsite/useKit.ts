@@ -246,13 +246,16 @@ export function useKit() {
         // leaves, just without a map to carry it through.
         if (i === 0) {
           const bark = p.material as THREE.MeshStandardMaterial
+          // LIGHTING-REWORK (2026-08-17): color '#610000' and
+          // emissiveIntensity 0.42->0.59 baked from the ?debug panel's
+          // "Tree bark" folder at the user's request — added because this
+          // material stayed MeshStandardMaterial (see the comment above),
+          // so it's the one tree surface with a full PBR response to the
+          // much brighter key/rim baked in this session, and the one the
+          // user flagged as reading too bright at the pack's own colour.
+          bark.color = new THREE.Color('#610000')
           bark.emissive = new THREE.Color('#2a1f1a')
-          bark.emissiveIntensity = 0.42
-          // LIGHTING-REWORK (2026-08-17): registered for the ?debug panel's
-          // "Tree bark" folder — this material stayed MeshStandardMaterial
-          // (see the comment above), so it's the one tree surface with a
-          // full PBR response to the much brighter key/rim baked in this
-          // session, and the one the user flagged as reading too bright.
+          bark.emissiveIntensity = 0.59
           BARK_MATERIALS.push(bark)
           return p
         }
