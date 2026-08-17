@@ -39,7 +39,9 @@ export const FIRELIGHT = {
   // zone is wider through the middle, only dropping steeply further out than
   // 9.5 units covers. Splitting the difference between the original 12 and
   // the first attempt.
-  key: { intensity: 34, distance: 11, color: '#ffbb82' },
+  // LIGHTING-REWORK (2026-08-17): baked from ?debug at the user's request —
+  // intensity 34->80, distance 11->30.
+  key: { intensity: 80, distance: 30, color: '#ffbb82' },
   /** Cool and hot ends of the flame's colour swing. */
   coolEnd: /* @__PURE__ */ new THREE.Color('#ff7a24'),
   hotEnd: /* @__PURE__ */ new THREE.Color('#ffc272'),

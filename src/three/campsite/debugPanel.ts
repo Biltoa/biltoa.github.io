@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import type { BloomEffect, BrightnessContrastEffect, VignetteEffect } from 'postprocessing'
 import type { SplitToneEffect } from './grade'
+import { TREE_GAIN, GRASS_GAIN } from './debugGain'
+import { BARK_MATERIALS } from './useKit'
 
 /* -------------------------------------------------------------------------- */
 /*  Lighting debug panel — lil-gui, gated behind `?debug`, lazy-imported.       */
@@ -117,6 +119,25 @@ export async function mountDebugPanel(handles: DebugHandles) {
     if (darkness) f.add(darkness, 'value', 0, 1, 0.01).name('darkness')
   }
 
+  {
+    const f = gui.addFolder('Trees (canopy gain)')
+    f.add(TREE_GAIN, 'value', 0, 3, 0.01).name('gain')
+  }
+  {
+    const f = gui.addFolder('Grass (blades + ground, gain)')
+    f.add(GRASS_GAIN, 'value', 0, 3, 0.01).name('gain')
+  }
+  if (BARK_MATERIALS.length) {
+    const f = gui.addFolder('Tree bark')
+    const proxy = { hex: `#${BARK_MATERIALS[0].color.getHexString()}`, emissiveIntensity: BARK_MATERIALS[0].emissiveIntensity }
+    f.addColor(proxy, 'hex').name('color').onChange((v: string) => {
+      for (const m of BARK_MATERIALS) m.color.set(v)
+    })
+    f.add(proxy, 'emissiveIntensity', 0, 1, 0.01).onChange((v: number) => {
+      for (const m of BARK_MATERIALS) m.emissiveIntensity = v
+    })
+  }
+
   const fogFolder = gui.addFolder('Fog (read-only — baked into GLSL, edit fog.ts)')
   fogFolder.add({ near: 20 }, 'near').disable()
   fogFolder.add({ far: 58 }, 'far').disable()
@@ -135,6 +156,9 @@ export async function mountDebugPanel(handles: DebugHandles) {
           })
         if (handles.ambient) console.log('ambient', { intensity: handles.ambient.intensity, color: `#${handles.ambient.color.getHexString()}` })
         if (handles.fireKey) console.log('fireKey', { intensity: handles.fireKey.intensity, distance: handles.fireKey.distance })
+        console.log('treeGain', TREE_GAIN.value, 'grassGain', GRASS_GAIN.value)
+        if (BARK_MATERIALS.length)
+          console.log('bark', { color: `#${BARK_MATERIALS[0].color.getHexString()}`, emissiveIntensity: BARK_MATERIALS[0].emissiveIntensity })
         if (handles.constants) console.log('constants at load (NIGHT, FIRELIGHT, ...)', handles.constants)
         console.log('fog.ts constants: FOG_NEAR=20 FOG_FAR=58 — edit the file, these are baked into GLSL')
       },

@@ -3,6 +3,17 @@ import { useThree } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { AURORA_BOUNCE_HIGH, AURORA_BOUNCE_LOW, AURORA_BOUNCE_MID, applyWind } from './wind'
+import { attachDebugGain, TREE_GAIN, GRASS_GAIN } from './debugGain'
+
+/**
+ * Bark materials, one per species, collected as they're built so the
+ * `?debug` panel can expose a shared colour/emissive control for them — see
+ * campsite/debugPanel.ts. Trees are the one part of the scene that stayed on
+ * MeshStandardMaterial (see the note at `treeParts` below), so a much
+ * brighter key/rim light reaches their full PBR response instead of the
+ * flattened Lambert response everything else gets.
+ */
+export const BARK_MATERIALS: THREE.MeshStandardMaterial[] = []
 
 /**
  * Loader + helpers for the campsite kit.
@@ -201,6 +212,10 @@ export function useKit() {
           // a colour ramp the whole way rather than a switch at the end of one.
           warmTint: new THREE.Color('#f0a56e'),
         })
+        // LIGHTING-REWORK (2026-08-17): live gain for the ?debug panel's
+        // "Grass" slider, requested separately from the scene-wide
+        // hemisphere/ambient that also light this material.
+        attachDebugGain(m, GRASS_GAIN)
         return { geometry: p.geometry, material: m }
       })
       grassCache.set(name, out)
@@ -233,6 +248,12 @@ export function useKit() {
           const bark = p.material as THREE.MeshStandardMaterial
           bark.emissive = new THREE.Color('#2a1f1a')
           bark.emissiveIntensity = 0.42
+          // LIGHTING-REWORK (2026-08-17): registered for the ?debug panel's
+          // "Tree bark" folder — this material stayed MeshStandardMaterial
+          // (see the comment above), so it's the one tree surface with a
+          // full PBR response to the much brighter key/rim baked in this
+          // session, and the one the user flagged as reading too bright.
+          BARK_MATERIALS.push(bark)
           return p
         }
         const src = p.material as THREE.MeshStandardMaterial
@@ -328,6 +349,9 @@ export function useKit() {
             span: 9,
           },
         })
+        // LIGHTING-REWORK (2026-08-17): live gain for the ?debug panel's
+        // "Trees" slider, requested separately from "Grass" above.
+        attachDebugGain(m, TREE_GAIN)
         return { geometry: p.geometry, material: m }
       })
       leafCache.set(species, out)

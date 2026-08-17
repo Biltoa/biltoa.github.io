@@ -45,6 +45,7 @@ import {
   rng,
 } from './campsite/Effects'
 import { debugEnabled, mountDebugPanel } from './campsite/debugPanel'
+import { attachDebugGain, GRASS_GAIN } from './campsite/debugGain'
 
 /* -------------------------------------------------------------------------- */
 /*  Night lighting, in one place.                                               */
@@ -58,10 +59,14 @@ import { debugEnabled, mountDebugPanel } from './campsite/debugPanel'
 /*  cannot reach from being black holes.                                        */
 /* -------------------------------------------------------------------------- */
 const NIGHT = {
-  /** Key: the moon. Aligned with the disc painted in the sky shader. */
-  moon: { intensity: 1.55, color: '#93b4ee' },
-  /** Cool rim from behind and above, which is what separates tent from tree. */
-  rim: { intensity: 0.62, color: '#5aa9ff' },
+  /** Key: the moon. Aligned with the disc painted in the sky shader.
+      LIGHTING-REWORK (2026-08-17): baked from the ?debug panel at the
+      user's request — intensity 1.55->4, color '#93b4ee'->'#ffffff'. */
+  moon: { intensity: 4, color: '#ffffff' },
+  /** Cool rim from behind and above, which is what separates tent from tree.
+      LIGHTING-REWORK (2026-08-17): baked from ?debug — intensity 0.62->2,
+      color '#5aa9ff'->'#ffffff'. */
+  rim: { intensity: 2, color: '#ffffff' },
   /**
    * Sky and ground bounce. Navy above, near-black below: a hemisphere light
    * with a lifted ground colour is exactly the grey-shadow failure mode.
@@ -83,10 +88,13 @@ const NIGHT = {
   // outer-grass corner (item a) showed a faint warm cast where the target is
   // near-neutral/cool at the same near-black luminance — this is a small,
   // low-cost push in that direction. See LIGHTING_TUNING.md.
-  hemisphere: { sky: '#2a3050', ground: '#070a14', intensity: 0.23 },
-  /** The last resort against crushed black. Very small. */
-  // LIGHTING-REWORK (2026-08-17): #22345e -> #1c2c5c, same intensity.
-  ambient: { intensity: 0.05, color: '#1c2c5c' },
+  // LIGHTING-REWORK (2026-08-17): baked from ?debug — sky '#2a3050'->'#000000',
+  // ground '#070a14'->'#d1d1d1', intensity 0.23->1.
+  hemisphere: { sky: '#000000', ground: '#d1d1d1', intensity: 1 },
+  /** The last resort against crushed black.
+      LIGHTING-REWORK (2026-08-17): baked from ?debug — intensity 0.05->1,
+      color '#1c2c5c'->'#ff0000'. */
+  ambient: { intensity: 1, color: '#ff0000' },
   /**
    * Depth haze. See campsite/fog.ts — this is height fog, not distance fog.
    *
@@ -608,6 +616,10 @@ function Ground() {
       // this stays just as small.
       floor: new THREE.Color('#0a1120'),
     })
+    // LIGHTING-REWORK (2026-08-17): shares GRASS_GAIN with the blade
+    // materials in useKit.ts, so the ?debug panel's "Grass" slider moves the
+    // ground plane and the blades standing on it together.
+    attachDebugGain(m, GRASS_GAIN)
     return m
   }, [grass, grassN])
 
@@ -780,10 +792,20 @@ function Scatter() {
         // which from the lobby camera is the whole bottom of the frame: the
         // strip of ground the reader looks *across* to reach the fire came out
         // bald, and a bald strip right at the near edge reads as a hole in the
-        // field. Only the last metre and a half in front of the lens is cleared
-        // now, where a blade would be a foot tall in frame.
-        if (z > 11.6) continue
-        if (z > 10.3 && Math.abs(x - CAMP_X) < 1.7) continue
+        // field.
+        //
+        // LIGHTING-REWORK (2026-08-17): 11.6/10.3 -> 13.2/12.2. The camera's
+        // vertical FOV widens on narrower/taller windows to hold the
+        // horizontal framing (see CameraRig's `fov` target), which exposes
+        // more of the near-field ground than the default 16:9 composition
+        // shows — reported as "an empty patch that looks like broken grass"
+        // on a resized window. The flat, undressed `grassMat` colour reading
+        // as a hole next to jagged, aurora/moonlit-tinted blades was the
+        // actual bug; grass now comes in closer to the lens (still with a
+        // ~0.8m clearance so blades don't poke through the near clip at
+        // any aspect) rather than the bare plane showing at all.
+        if (z > 13.2) continue
+        if (z > 12.2 && Math.abs(x - CAMP_X) < 1.7) continue
         const dFire = Math.hypot(x - FIRE_POS[0], z - FIRE_POS[2])
         // Overlaps the paving slightly on purpose: tufts closing over the outer
         // setts are what tie the walkway into the clearing, and matching the two
