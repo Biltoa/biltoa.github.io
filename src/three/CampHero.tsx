@@ -1383,11 +1383,22 @@ function Tent({
     // streaks" and reproduced with moon/rim off (hemisphere + the much
     // stronger campfire light alone are enough). Metalness is 0 on this
     // material (checked the source glb) — this was never a metal-material
-    // bug, just a specular lobe sized for a dimmer scene. Some sheen is kept
-    // (not the flat 0.92) since the light budget here really is that much
-    // higher now.
+    // bug, just a specular lobe sized for a dimmer scene.
+    //
+    // LIGHTING-REWORK (2026-08-17): 0.9 -> 1.0. The streak was still visible
+    // at 0.9 even with moon/rim/hemisphere/ambient all zeroed — the
+    // remaining culprit is the door torches, which sit close enough to a
+    // tent's own guy-ropes that any real roughness<1 specular lobe still
+    // catches them at grazing incidence. The user asked for this fixed on
+    // the material rather than by touching torch light values. Fully flat
+    // (no GGX highlight at all — 1.0 is the material's matte ceiling, not
+    // just "very rough") kills it regardless of how bright any nearby
+    // light gets. Does not touch the hover highlight: that's a wholly
+    // separate unlit emissive shell (`makeOutlineShell`, see
+    // campsite/outline.ts) plus an emissive wash on `glowParts` below,
+    // neither of which reads `roughness` at all.
     const list = tintParts(kit.parts(TENT.node), TENT_TINT[index], {
-      roughness: 0.9,
+      roughness: 1.0,
       side: THREE.DoubleSide,
       emissive: new THREE.Color('#000000'),
     })
@@ -2328,9 +2339,11 @@ function Scene({
         from over the camp's left shoulder — the same quarter as the moon, but
         further back, so a rim and a key never light the same face.
       */}
+      {/* LIGHTING-REWORK (2026-08-17): x -16 -> 10, baked from the ?debug
+          panel's Rim x/y/z sliders at the user's request. */}
       <directionalLight
         ref={rimLight}
-        position={[-16, 20, -34]}
+        position={[10, 20, -34]}
         intensity={NIGHT.rim.intensity}
         color={NIGHT.rim.color}
       />
