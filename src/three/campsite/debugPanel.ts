@@ -50,6 +50,14 @@ export async function mountDebugPanel(handles: DebugHandles) {
     const f = gui.addFolder('Moon (key)')
     f.add(handles.moon, 'intensity', 0, 4, 0.01)
     colorCtrl(f, handles.moon, 'color')
+    // Same reasoning as Rim's position sliders below: no explicit `target`
+    // is set on this DirectionalLight, so it always aims at world origin —
+    // moving position alone re-aims it live. Useful for pushing it more
+    // directly behind the treeline for a stronger backlit-canopy rim,
+    // rather than adding a second light to do the same job.
+    f.add(handles.moon.position, 'x', -80, 80, 0.5)
+    f.add(handles.moon.position, 'y', -20, 100, 0.5)
+    f.add(handles.moon.position, 'z', -100, 60, 0.5)
   }
   if (handles.rim) {
     const f = gui.addFolder('Rim')
@@ -188,7 +196,12 @@ export async function mountDebugPanel(handles: DebugHandles) {
     {
       dump: () => {
         console.log('--- lighting values ---')
-        if (handles.moon) console.log('moon', { intensity: handles.moon.intensity, color: `#${handles.moon.color.getHexString()}` })
+        if (handles.moon)
+          console.log('moon', {
+            intensity: handles.moon.intensity,
+            color: `#${handles.moon.color.getHexString()}`,
+            position: handles.moon.position.toArray().map((v) => Math.round(v * 10) / 10),
+          })
         if (handles.rim)
           console.log('rim', {
             intensity: handles.rim.intensity,

@@ -1728,10 +1728,17 @@ export function Campfire({
   )
 
   const SMOKE = 6
-  const smokeMats = useMemo(
-    () => Array.from({ length: SMOKE }, (_, i) => makeSmokeMaterial(i * 4.3, '#9d8ab0', 0.05)),
-    []
-  )
+  const smokeMats = useMemo(() => {
+    // LIGHTING-REWORK (2026-08-17): opacity 0.05->0.09, and varied per puff
+    // rather than one flat value shared by all six — reported as "barely
+    // visible" and, combined with the perfectly even spawn spacing fixed
+    // in smokePuffs below, "looks fake." A little per-puff variance in how
+    // dense each one is is cheap (same material count, same draw calls)
+    // and is most of what stops six identical puffs reading as one puff
+    // repeated six times.
+    const r = rng(919)
+    return Array.from({ length: SMOKE }, (_, i) => makeSmokeMaterial(i * 4.3, '#9d8ab0', 0.07 + r() * 0.05))
+  }, [])
 
   useLayoutEffect(
     () => () => {
@@ -1762,8 +1769,14 @@ export function Campfire({
 
   const smokePuffs = useMemo(() => {
     const r = rng(717)
-    return Array.from({ length: SMOKE }, (_, i) => ({
-      offset: i / SMOKE,
+    // LIGHTING-REWORK (2026-08-17): offset i/SMOKE -> fully random. Six
+    // puffs at exactly 1/6-cycle spacing rise in metronomic lockstep —
+    // reported as "spawns so uniform and timed it looks very fake," which
+    // is exactly what perfectly even phase spacing produces regardless of
+    // how much the other per-puff values already vary. A real fire doesn't
+    // shed puffs on a schedule.
+    return Array.from({ length: SMOKE }, () => ({
+      offset: r(),
       speed: 0.062 + r() * 0.04,
       drift: 0.35 + r() * 1.05,
       spin: (r() - 0.5) * 0.5,
