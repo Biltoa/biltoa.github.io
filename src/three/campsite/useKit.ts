@@ -28,6 +28,9 @@ export const BARK_MATERIALS: THREE.MeshStandardMaterial[] = []
  */
 export const ALL_STANDARD_MATERIALS: THREE.MeshStandardMaterial[] = []
 
+/** Guards the material-upgrade traversal in useKit() — see its comment. */
+let kitMaterialsUpgraded = false
+
 /**
  * Loader + helpers for the campsite kit.
  *
@@ -100,46 +103,71 @@ export function useKit() {
       }
     })
 
-    // LIGHTING-REWORK (2026-08-17): strip the pack's shared roughness/
-    // metalness map off every material, scene-wide.
+    // LIGHTING-REWORK (2026-08-17): two passes at the same "white streak"
+    // report — see LIGHTING_TUNING.md for the full history. First pass
+    // stripped the shared roughness/metalness map (real, see the bug
+    // description that used to live here) but the streak was still
+    // visible after that. Second pass, this one:
     //
-    // Checked the source glb directly rather than guess: `metallicFactor`
-    // is 0 on every single material in this kit, tents included — glTF
-    // multiplies that scalar by the texture's metalness channel, so
-    // metalness is already exactly 0 everywhere regardless of what the
-    // texture contains. This was never a metal-material bug.
+    // Roughness controls the *spread* of a specular lobe, not whether one
+    // exists. Fresnel reflectance (Schlick's approximation) climbs toward
+    // 1.0 at grazing angles for *any* dielectric, at *any* roughness — a
+    // rough surface still throws a wide, dim highlight, and thin edge
+    // geometry (rope, trim, a canopy's silhouette) is exactly the shape
+    // that puts a grazing angle in front of the camera constantly. With
+    // the fire/moon/rim intensities this scene now runs at, that grazing
+    // term alone carries enough energy to blow through Bloom regardless
+    // of how matte the surface is. No amount of roughness fixes that —
+    // it's a different term.
     //
-    // Roughness is the real one. Most of these materials ship a
-    // `metallicRoughnessTexture` and no explicit `roughnessFactor`, which
-    // defaults to 1.0 per the glTF spec — so the *texture's* green channel
-    // is the only thing driving roughness, not any scalar. Setting
-    // `material.roughness = 1.0` (as the tent material does) does not
-    // remove that map; three still multiplies it in, and wherever the
-    // shared atlas bakes a shinier value — rope trim, buckles, edge
-    // details, reused across the tent, the benches, the tree bark — that
-    // region stays glossy no matter the scalar. This is why the reported
-    // "white metallic streaks" showed up on ropes, bench edges and tree
-    // outlines at once: one shared texture convention, not a per-mesh
-    // bug. Removing the map makes every remaining MeshStandardMaterial in
-    // the kit fully flat and matte, controlled only by its own scalar
-    // `roughness` (which individual call sites, like the tent's
-    // `tintParts`, still set explicitly).
-    gltf.scene.traverse((o) => {
-      const mesh = o as THREE.Mesh
-      if (!mesh.isMesh) return
-      for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        const m = mat as THREE.MeshStandardMaterial
-        if (m.roughnessMap) {
-          m.roughnessMap = null
-          m.needsUpdate = true
-        }
-        if (m.metalnessMap) {
-          m.metalnessMap = null
-          m.needsUpdate = true
-        }
-        ALL_STANDARD_MATERIALS.push(m)
-      }
-    })
+    // `MeshStandardMaterial` has no way to turn that term down; only
+    // `MeshPhysicalMaterial`'s `specularIntensity` (KHR_materials_specular)
+    // scales the reflectance itself, independent of every light in the
+    // scene. Upgrading every material found here to `MeshPhysicalMaterial`
+    // and pinning `specularIntensity` low is the one lever that kills the
+    // grazing highlight without touching a single light value — which is
+    // what was explicitly asked for.
+    //
+    // **Guarded to run exactly once, scene-wide — not once per hook call.**
+    // `useKit()` is called from Scatter, Torch, Candle, TentInterior and
+    // Tent (×3, one per tent), and `useGLTF`'s cache means every one of
+    // those calls' `gltf.scene` is the *same* shared object graph, not a
+    // copy. Without the guard this traverse ran again for every one of
+    // those components in the same commit, and because it *disposes* the
+    // material it just replaced, each later call was disposing the exact
+    // material instance an earlier call had already handed to a `Part` and
+    // (for direct, un-cloned uses like Bench/Stone) already attached to a
+    // mesh mid-frame — freshly-live materials thrown away and recompiled
+    // five-plus times over on every load. Reproduced as a hang: headless
+    // `tools/shot.mjs` timed out waiting for a stable frame twice in a row
+    // with this un-guarded, while the always-warm interactive dev tab
+    // (already past that first commit before the bug was introduced)
+    // never showed it — the tell that it was a first-mount-only problem.
+    if (!kitMaterialsUpgraded) {
+      kitMaterialsUpgraded = true
+      gltf.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        const upgraded = materials.map((mat) => {
+          const m = mat as THREE.MeshStandardMaterial
+          if (m.roughnessMap) m.roughnessMap = null
+          if (m.metalnessMap) m.metalnessMap = null
+          const phys = new THREE.MeshPhysicalMaterial().copy(m)
+          // Nowhere near 0: at exactly 0 a couple of surfaces (the
+          // glassware) lost the one highlight that read as "glass" rather
+          // than "solid colour." This is low enough that the grazing
+          // Fresnel term stops reading as a highlight at all — a few
+          // percent of reflectance, not zero.
+          phys.specularIntensity = 0.04
+          phys.needsUpdate = true
+          m.dispose()
+          ALL_STANDARD_MATERIALS.push(phys)
+          return phys
+        })
+        mesh.material = Array.isArray(mesh.material) ? upgraded : upgraded[0]
+      })
+    }
 
     // Foliage reads as cardboard without two-sided rendering, and the pack
     // authors its leaves as single-sided cards. Alpha cutout itself is set in

@@ -187,14 +187,22 @@ export async function mountDebugPanel(handles: DebugHandles) {
     // directly, `metallicFactor` is 0 on every material in the kit, and
     // glTF multiplies that scalar by the texture, so metalness is already
     // forced to exactly 0 regardless of what the removed metalnessMap
-    // contained. This slider is here so that's verifiable by eye rather
-    // than by taking that on faith: drag it up and every surface below
-    // should go mirror-like uniformly, which is not what the streak
-    // looked like (it was isolated to specific trim/edge regions — see
-    // the roughness-map fix above, the actual cause).
+    // contained. Drag this up and every surface should go mirror-like
+    // uniformly, which is not what the streak looked like.
     const proxy = { metalness: ALL_STANDARD_MATERIALS[0].metalness }
     f.add(proxy, 'metalness', 0, 1, 0.01).onChange((v: number) => {
       for (const m of ALL_STANDARD_MATERIALS) m.metalness = v
+    })
+    // The actual lever: Fresnel reflectance climbs toward white at grazing
+    // angles regardless of roughness (that fix, tried first, helped but
+    // didn't clear it — see LIGHTING_TUNING.md). specularIntensity scales
+    // that reflectance term directly, independent of every light in the
+    // scene. All kit materials were upgraded to MeshPhysicalMaterial and
+    // pinned to 0.04 by default specifically so this control exists.
+    const spec = ALL_STANDARD_MATERIALS[0] as unknown as { specularIntensity: number }
+    const specProxy = { specularIntensity: spec.specularIntensity ?? 0.04 }
+    f.add(specProxy, 'specularIntensity', 0, 1, 0.01).onChange((v: number) => {
+      for (const m of ALL_STANDARD_MATERIALS) (m as unknown as { specularIntensity: number }).specularIntensity = v
     })
   }
 
