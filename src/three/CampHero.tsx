@@ -2311,10 +2311,18 @@ function Scene({
           how a full moon works anyway: the disc is not what makes it bright,
           the halo around it is.
         */}
+        {/* LIGHTING-REWORK (2026-08-17): threshold 0.80->0.87, smoothing
+            0.16->0.11. imagestats' 5th-percentile check (item b) showed the
+            global black floor sitting above the new target reference; a wide
+            mipmap bloom bleeds a little brightness into every dark pixel in
+            the frame even at a fairly high threshold, and tightening both
+            knobs cuts fewer things out (the fire core, wicks, moon are all
+            still >0.9) while narrowing how far the glow reaches into the
+            near-black regions. See LIGHTING_TUNING.md. */}
         <Bloom
           intensity={1.45}
-          luminanceThreshold={0.80}
-          luminanceSmoothing={0.16}
+          luminanceThreshold={0.87}
+          luminanceSmoothing={0.11}
           mipmapBlur
           radius={0.62}
           levels={BLOOM_LEVELS}
@@ -2387,7 +2395,11 @@ function Scene({
             contrast is a subtraction — at 0.115 it was driving the green
             channel of firelit grass through zero and clipping it, which is what
             turned an orange field into a flat crimson one. */}
-        <BrightnessContrast brightness={-0.02} contrast={0.085} />
+        {/* LIGHTING-REWORK (2026-08-17): contrast 0.085 -> 0.105 alongside
+            the bloom tighten above, same reasoning (item b). See
+            [[portfolio-post-chain-tonemapping]] before pushing this further —
+            past ~0.115 it drove firelit grass's green channel through zero. */}
+        <BrightnessContrast brightness={-0.02} contrast={0.105} />
         <SplitTone />
         {/* Light. The corners of the reference are dark because its *sky* is
             dark there, not because a lens is closing them down — and at 0.32 /
