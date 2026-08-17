@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { BloomEffect, BrightnessContrastEffect, VignetteEffect } from 'postprocessing'
 import type { SplitToneEffect } from './grade'
 import { TREE_GAIN, GRASS_GAIN } from './debugGain'
-import { BARK_MATERIALS } from './useKit'
+import { ALL_STANDARD_MATERIALS, BARK_MATERIALS } from './useKit'
 import { TREE_CANOPY_SHADERS } from './wind'
 
 /* -------------------------------------------------------------------------- */
@@ -177,6 +177,24 @@ export async function mountDebugPanel(handles: DebugHandles) {
     })
     f.add(proxy, 'emissiveIntensity', 0, 1, 0.01).onChange((v: number) => {
       for (const m of BARK_MATERIALS) m.emissiveIntensity = v
+    })
+  }
+
+  if (ALL_STANDARD_MATERIALS.length) {
+    const f = gui.addFolder('Metalness (all standard materials)')
+    // LIGHTING-REWORK (2026-08-17): for testing whether metalness is the
+    // "white streak" root cause. It isn't — checked the source glb
+    // directly, `metallicFactor` is 0 on every material in the kit, and
+    // glTF multiplies that scalar by the texture, so metalness is already
+    // forced to exactly 0 regardless of what the removed metalnessMap
+    // contained. This slider is here so that's verifiable by eye rather
+    // than by taking that on faith: drag it up and every surface below
+    // should go mirror-like uniformly, which is not what the streak
+    // looked like (it was isolated to specific trim/edge regions — see
+    // the roughness-map fix above, the actual cause).
+    const proxy = { metalness: ALL_STANDARD_MATERIALS[0].metalness }
+    f.add(proxy, 'metalness', 0, 1, 0.01).onChange((v: number) => {
+      for (const m of ALL_STANDARD_MATERIALS) m.metalness = v
     })
   }
 

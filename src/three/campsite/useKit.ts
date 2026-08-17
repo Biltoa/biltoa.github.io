@@ -16,6 +16,19 @@ import { attachDebugGain, TREE_GAIN, GRASS_GAIN } from './debugGain'
 export const BARK_MATERIALS: THREE.MeshStandardMaterial[] = []
 
 /**
+ * Every MeshStandardMaterial the kit loads (tents, benches, stones,
+ * torches, props — everything that didn't get converted to Lambert), for
+ * the `?debug` panel's metalness slider. Registered once, in the load-time
+ * traversal below, before anything clones them — `tintParts` clones from
+ * these, and clones carry `.needsUpdate` recompiles independently, so a
+ * slider bound only to these originals would not reach a tent's actual
+ * on-screen material. Push happens in the same traversal that strips
+ * roughness/metalness maps, so this list is exactly "every material that
+ * still has a metalness concept at all."
+ */
+export const ALL_STANDARD_MATERIALS: THREE.MeshStandardMaterial[] = []
+
+/**
  * Loader + helpers for the campsite kit.
  *
  * The GLB is built by tools/export-campsite.py from the Dreamscape Campsite
@@ -84,6 +97,47 @@ export function useKit() {
             map.needsUpdate = true
           }
         }
+      }
+    })
+
+    // LIGHTING-REWORK (2026-08-17): strip the pack's shared roughness/
+    // metalness map off every material, scene-wide.
+    //
+    // Checked the source glb directly rather than guess: `metallicFactor`
+    // is 0 on every single material in this kit, tents included — glTF
+    // multiplies that scalar by the texture's metalness channel, so
+    // metalness is already exactly 0 everywhere regardless of what the
+    // texture contains. This was never a metal-material bug.
+    //
+    // Roughness is the real one. Most of these materials ship a
+    // `metallicRoughnessTexture` and no explicit `roughnessFactor`, which
+    // defaults to 1.0 per the glTF spec — so the *texture's* green channel
+    // is the only thing driving roughness, not any scalar. Setting
+    // `material.roughness = 1.0` (as the tent material does) does not
+    // remove that map; three still multiplies it in, and wherever the
+    // shared atlas bakes a shinier value — rope trim, buckles, edge
+    // details, reused across the tent, the benches, the tree bark — that
+    // region stays glossy no matter the scalar. This is why the reported
+    // "white metallic streaks" showed up on ropes, bench edges and tree
+    // outlines at once: one shared texture convention, not a per-mesh
+    // bug. Removing the map makes every remaining MeshStandardMaterial in
+    // the kit fully flat and matte, controlled only by its own scalar
+    // `roughness` (which individual call sites, like the tent's
+    // `tintParts`, still set explicitly).
+    gltf.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      for (const mat of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const m = mat as THREE.MeshStandardMaterial
+        if (m.roughnessMap) {
+          m.roughnessMap = null
+          m.needsUpdate = true
+        }
+        if (m.metalnessMap) {
+          m.metalnessMap = null
+          m.needsUpdate = true
+        }
+        ALL_STANDARD_MATERIALS.push(m)
       }
     })
 
@@ -392,6 +446,12 @@ export function tintParts(parts: Part[], tint: string, extra?: Partial<THREE.Mes
     const m = (material as THREE.MeshStandardMaterial).clone()
     m.color = new THREE.Color(tint)
     if (extra) Object.assign(m, extra)
+    // Registered separately from the traversal in useKit() above: this is
+    // a *clone*, made fresh per call (once per tent instance), so it isn't
+    // the same object that traversal saw. Without this the debug
+    // metalness slider would move the un-rendered originals and every
+    // tent on screen would sit still.
+    ALL_STANDARD_MATERIALS.push(m)
     return { geometry, material: m }
   })
 }
