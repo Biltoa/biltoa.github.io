@@ -80,7 +80,7 @@ export function rng(seed: number) {
  * Soft radial sprite used for sparks and the fire's ground glow. Generated
  * rather than shipped — it is a gradient, and a gradient is code.
  */
-function makeGlowTexture(inner = 'rgba(255,236,180,1)', mid = 'rgba(255,176,60,0.55)') {
+export function makeGlowTexture(inner = 'rgba(255,236,180,1)', mid = 'rgba(255,176,60,0.55)') {
   const c = document.createElement('canvas')
   c.width = c.height = 128
   const ctx = c.getContext('2d')!

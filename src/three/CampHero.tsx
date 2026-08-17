@@ -35,6 +35,7 @@ import {
   Impostors,
   InstancedParts,
   Leaves,
+  makeGlowTexture,
   MOON_LIGHT,
   NightSky,
   Stars,
@@ -221,6 +222,8 @@ const TENTS = [
 const TENT_TINT = ['#e8492c', '#3f6ef5', '#f5b722']
 /** Saturated neon versions for the signage — a tent tint is fabric, not light. */
 const TENT_NEON = ['#ff5a3c', '#5aa0ff', '#ffc94a']
+/** `THREE.Color` copies of TENT_NEON, for props that take a Color object. */
+const TENT_NEON_COLOR = /* @__PURE__ */ TENT_NEON.map((c) => new THREE.Color(c))
 const TENT_LABEL = ['About', 'Gameplay', 'Projects']
 
 const EYE = 2.15
@@ -332,6 +335,15 @@ function tentFrame(index: number) {
     book: at(BOOK_LOCAL.x, BOOK_LOCAL.z),
     readEye: at(BOOK_LOCAL.x, BOOK_LOCAL.z + READ_BACK),
   }
+}
+
+/** Ground point just outside a tent's doorway, for the spill pool. */
+function tentDoorSpill(index: number) {
+  const t = TENTS[index]
+  const fx = Math.sin(t.yaw)
+  const fz = Math.cos(t.yaw)
+  const depth = BACK + 0.85
+  return { x: t.x + fx * depth, z: t.z + fz * depth }
 }
 
 /** World positions of a tent's two door torches. */
@@ -954,6 +966,44 @@ function ContactShadow({
         depthWrite={false}
         polygonOffset
         polygonOffsetFactor={-1}
+      />
+    </mesh>
+  )
+}
+
+// LIGHTING-REWORK (2026-08-17, item g/5): one shared glow texture for the
+// three doorway spill pools, tinted per tent via the mesh material's own
+// `color` rather than three separate canvases.
+let doorwaySpillTex: THREE.Texture | null = null
+function getDoorwaySpillTex() {
+  if (!doorwaySpillTex) doorwaySpillTex = makeGlowTexture('rgba(255,255,255,0.85)', 'rgba(255,255,255,0.4)')
+  return doorwaySpillTex
+}
+
+/**
+ * Painted, not lit: a flat additive pool on the ground just outside each
+ * tent's doorway, tinted to that tent's own neon.
+ *
+ * imagestats (item g) showed the current frame's interior glow stopping dead
+ * at the threshold where the new target reference has colour spilling out
+ * onto the grass. `Tent`'s own `glowLight` is real and short-reach by
+ * design (see its own comment — it exists to light the canvas from inside,
+ * not the ground outside), so this is the same fake-pool trick as the
+ * torches rather than a change to that light's reach.
+ */
+function DoorwaySpill({ position, color, opacity = 0.34 }: { position: [number, number, number]; color: THREE.Color; opacity?: number }) {
+  return (
+    <mesh rotation-x={-Math.PI / 2} position={position}>
+      <planeGeometry args={[2.6, 2.6]} />
+      <meshBasicMaterial
+        map={getDoorwaySpillTex()}
+        color={color}
+        transparent
+        opacity={opacity}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+        fog={false}
       />
     </mesh>
   )
@@ -2297,6 +2347,17 @@ function Scene({
           onClose={() => onExit?.()}
         />
       ))}
+
+      {[0, 1, 2].map((i) => {
+        const p = tentDoorSpill(i)
+        return (
+          <DoorwaySpill
+            key={`spill${i}`}
+            position={[p.x, 0.025, p.z]}
+            color={TENT_NEON_COLOR[i]}
+          />
+        )
+      })}
 
       {[0, 1, 2].map((i) => (
         <TentSign
