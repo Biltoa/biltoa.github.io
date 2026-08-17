@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ahmad Bilto — Gameplay &amp; Tools Developer</title>
+    <meta
+      name="description"
+      content="Ahmad Bilto — Unity gameplay and tools developer. Responsive gameplay systems, shipped cross-platform titles, and editor workflows that help teams iterate faster."
+    />
+    <meta name="theme-color" content="#EFE9DF" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content="Ahmad Bilto — Gameplay &amp; Tools Developer" />
+    <meta
+      property="og:description"
+      content="Unity gameplay systems, shipped cross-platform titles, and editor tooling."
+    />
+    <meta property="og:type" content="website" />
+    <!--
+      The campsite kit is 2.7MB and it is the long pole in the load: nothing on
+      the landing page can be drawn until it is parsed. Starting the fetch from
+      the markup means it downloads *while* the three.js and React chunks are
+      still being fetched and parsed, rather than after — the network and the
+      main thread are different resources and there is no reason to use them one
+      at a time. `crossorigin` is required for the preload to match the request
+      three's FileLoader actually makes; without it the file is fetched twice.
+    -->
+    <link rel="preload" href="/models/campsite-kit.glb" as="fetch" crossorigin="anonymous" />
+
+    <!--
+      Same argument for the scene's textures, which were not even *requested*
+      until the hero chunk had parsed and mounted — about a second in, on a
+      warm local connection, and correspondingly worse on a real one. They are
+      loaded through three's ImageLoader, which sets crossOrigin to anonymous,
+      so these have to as well or each one is downloaded twice.
+    -->
+    <link rel="preload" href="/textures/T_AutumnGrass_01_C.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_AutumnGrass_01_N.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_Dirt_Ground_C.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_Dirt_Ground_N.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_Tree_Campsite_01_Billboard.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_Tree_Campsite_02_Billboard.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_Tree_Campsite_03_Billboard.webp" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="/textures/T_Tree_Campsite_04_Billboard.webp" as="image" crossorigin="anonymous" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
