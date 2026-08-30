@@ -143,6 +143,7 @@ export default function CampUI({
     const cursorParticles: Particle[] = []
     const nameEmbers: Particle[] = []
     const hintEmbers: Particle[] = []
+    const labelEmbers: Particle[] = []
 
     const pointer = { x: -999, y: -999, px: -999, py: -999, down: false }
     let raf = 0
@@ -182,6 +183,34 @@ export default function CampUI({
           hue: CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0],
         })
       }
+    }
+
+    /**
+     * Every corner informer that gets the name block's ember drift behind it.
+     *
+     * Queried per spawn rather than held as refs: two of these three are
+     * rendered by the page rather than by this component (the sound toggle and
+     * the way out of a tent both belong to the room's controls), and a lookup
+     * eight times a second is cheaper than threading refs through two more
+     * component boundaries to reach them.
+     */
+    const LABELS = '.campui__hint, .audioswitch, .doorback'
+
+    /** Embers off a whole label, the way the name block sheds them. */
+    const spawnLabelEmber = (el: Element) => {
+      if (el.closest('[data-hidden="true"]')) return
+      const r = el.getBoundingClientRect()
+      if (r.width < 1) return
+      labelEmbers.push({
+        x: r.left + Math.random() * r.width,
+        y: r.top + Math.random() * r.height,
+        vx: (Math.random() - 0.5) * 0.25,
+        vy: -0.16 - Math.random() * 0.3,
+        life: 0,
+        maxLife: 90 + Math.random() * 110,
+        size: 0.6 + Math.random() * 1.5,
+        hue: CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0],
+      })
     }
 
     const spawnNameEmber = () => {
@@ -263,11 +292,13 @@ export default function CampUI({
       if (nameTimer % 7 === 0) {
         spawnHintEmber(hintRef)
         spawnHintEmber(bookHintRef)
+        document.querySelectorAll(LABELS).forEach(spawnLabelEmber)
       }
 
       draw(cursorParticles)
       draw(nameEmbers)
       draw(hintEmbers)
+      draw(labelEmbers)
 
       ctx.globalCompositeOperation = 'source-over'
       raf = requestAnimationFrame(tick)

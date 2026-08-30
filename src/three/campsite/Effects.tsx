@@ -926,9 +926,49 @@ export function NightSky() {
    */
   const mat = useRef<THREE.ShaderMaterial>(null)
 
-  useFrame((state) => {
+  /**
+   * The aurora's own clock, and the reason it is not `state.clock.elapsedTime`.
+   *
+   * **The curtains dissolve into flat bands as the clock grows.** The drift
+   * (`p.x += t * 0.035` in `aurora()`) is a straight translation of the sample
+   * point, so the coordinate handed to `triNoise2d` grows without bound — and
+   * that field is built out of `fract()`, whose resolution is the float's ulp
+   * at whatever magnitude it is given. At t = 0 the trails are crisp; by
+   * t = 3600 (drift 126) they are visibly broadened; by t = 7200 (252) the sky
+   * is a wash with horizontal striping in it, and by t = 36000 there is no
+   * structure left at all. Reproduced by hand with `?skyt=<seconds>`, and
+   * pinned to this term specifically: wrapping the drift alone at t = 36000
+   * restores the curtains exactly, while wrapping the rotation inside
+   * `triNoise2d` (the other place time enters) changes nothing.
+   *
+   * Two things follow, and neither touches the shader or any tuned constant:
+   *
+   * 1. **Frame delta, not wall time.** A backgrounded tab stops rendering, but
+   *    `elapsedTime` keeps counting the wall clock it spent hidden — so
+   *    alt-tabbing away for half an hour and coming back handed the shader a
+   *    clock 1800s further on in a single step. That is the reported repro
+   *    ("switching browser, waiting a while"). Accumulating clamped deltas
+   *    means only time the sky was actually *on screen* counts, and one long
+   *    stall is worth one frame.
+   * 2. **A wrap, as a backstop.** 1800s of continuous watching is well inside
+   *    the clean range (drift 63, indistinguishable from t = 0 in a side by
+   *    side), and wrapping there costs one jump in the curtain positions at
+   *    the half hour instead of a sky that degrades permanently.
+   */
+  const AURORA_WRAP = 1800
+  const skyTime = useRef(0)
+  /** Dev-only: `?skyt=<seconds>` starts the sky clock late. See above. */
+  const SKY_T0 = useMemo(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return 0
+    const v = Number(new URLSearchParams(window.location.search).get('skyt'))
+    return Number.isFinite(v) ? v : 0
+  }, [])
+
+  useFrame((_state, delta) => {
     const u = mat.current?.uniforms
-    if (u) u.uTime.value = state.clock.elapsedTime
+    if (!u) return
+    skyTime.current = (skyTime.current + Math.min(delta, 0.1)) % AURORA_WRAP
+    u.uTime.value = skyTime.current + SKY_T0
   })
 
   return (

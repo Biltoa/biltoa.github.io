@@ -1,18 +1,72 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getNeighbours, getProject } from '../data/projects'
 import Thumb from '../components/Thumb'
+
+/** The gallery shot being read at full size, if any. */
+interface Zoomed {
+  src: string
+  caption: string
+}
+
+/**
+ * A gallery shot, opened over the page.
+ *
+ * Escape closes it, so does the backdrop and the corner control; while it is
+ * up the page behind it does not scroll, because a full-bleed picture that
+ * scrolls the document under itself is disorienting to get out of.
+ */
+function Lightbox({ shot, onClose }: { shot: Zoomed; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label={shot.caption}
+      onClick={onClose}
+    >
+      <button className="lightbox__close" onClick={onClose} aria-label="Close image">
+        ✕
+      </button>
+      {/* The picture itself is not a way out: clicking what you came to look
+          at should not dismiss it. */}
+      <figure onClick={(e) => e.stopPropagation()}>
+        <img src={shot.src} alt={shot.caption} />
+        <figcaption>{shot.caption}</figcaption>
+      </figure>
+    </div>
+  )
+}
 
 export default function ProjectDetail() {
   const { slug = '' } = useParams()
   const project = getProject(slug)
   const { prev, next } = getNeighbours(slug)
+  const [zoomed, setZoomed] = useState<Zoomed | null>(null)
+  const closeZoom = useCallback(() => setZoomed(null), [])
+
+  // A shot left open while navigating to the next project would be a picture
+  // of the project you just left.
+  useEffect(() => setZoomed(null), [slug])
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
     if (project) document.title = `${project.title} — Ahmad Bilto`
     return () => {
-      document.title = 'Ahmad Bilto — Gameplay & Tools Developer'
+      document.title = 'Ahmad Bilto — Unity Gameplay & Tools Developer'
     }
   }, [slug, project])
 
@@ -27,8 +81,8 @@ export default function ProjectDetail() {
             project
           </h1>
           <p>That slug does not exist. It may have been renamed.</p>
-          <Link className="btn" to="/projects" style={{ marginTop: 24 }}>
-            ← Back to projects
+          <Link className="btn" to="/" style={{ marginTop: 24 }}>
+            ← Back to the camp
           </Link>
         </div>
       </div>
@@ -41,8 +95,8 @@ export default function ProjectDetail() {
     <div className="page">
       <header className="detail-hero">
         <div className="wrap detail-hero__inner">
-          <Link className="backlink" to="/projects">
-            ← All projects
+          <Link className="backlink" to="/">
+            ← Back to the camp
           </Link>
 
           <div
@@ -134,32 +188,15 @@ export default function ProjectDetail() {
           </ul>
         </div>
 
+        {/*
+          Tags, and — for a game — where to go and play it. The column used to
+          also carry a "by the numbers" panel and a stack panel, and both were
+          restating the page: every figure in the metrics is already made in the
+          overview, and every name in the stack is already in the meta strip at
+          the top or in the technical notes. What is left is the two things that
+          are only here: the filter this belongs under, and the way out.
+        */}
         <aside className="aside">
-          {project.metrics && project.metrics.length > 0 && (
-            <div className="panel">
-              <h3>By the numbers</h3>
-              <div className="metrics">
-                {project.metrics.map((m) => (
-                  <div className="metric" key={m.label}>
-                    <b style={{ color: accentVar }}>{m.value}</b>
-                    <span>{m.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="panel">
-            <h3>Stack</h3>
-            <div className="chips">
-              {project.tech.map((t) => (
-                <span className="chip" key={t}>
-                  {t}
-                </span>
-              ))}
-            </div>
-          </div>
-
           <div className="panel">
             <h3>Tags</h3>
             <div className="chips">
@@ -171,7 +208,7 @@ export default function ProjectDetail() {
             </div>
           </div>
 
-          {project.links && project.links.length > 0 && (
+          {project.type === 'game' && project.links && project.links.length > 0 && (
             <div className="panel">
               <h3>Links</h3>
               <div className="stack" style={{ gap: 10 }}>
@@ -203,12 +240,20 @@ export default function ProjectDetail() {
               <figure key={g.caption}>
                 <div className="shot">
                   {g.src ? (
-                    <img
-                      src={g.src}
-                      alt={g.caption}
-                      loading="lazy"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
+                    <button
+                      type="button"
+                      className="shot-open"
+                      onClick={() => setZoomed({ src: g.src!, caption: g.caption })}
+                      aria-label={`Open full size: ${g.caption}`}
+                      style={{ width: '100%', height: '100%' }}
+                    >
+                      <img
+                        src={g.src}
+                        alt={g.caption}
+                        loading="lazy"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </button>
                   ) : (
                     <Thumb
                       seed={`${project.slug}-${i}`}
@@ -239,6 +284,8 @@ export default function ProjectDetail() {
           </Link>
         )}
       </nav>
+
+      {zoomed && <Lightbox shot={zoomed} onClose={closeZoom} />}
     </div>
   )
 }

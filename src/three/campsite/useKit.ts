@@ -16,9 +16,11 @@ import { attachDebugGain, TREE_GAIN, GRASS_GAIN } from './debugGain'
 export const BARK_MATERIALS: THREE.MeshStandardMaterial[] = []
 
 /**
- * Every MeshStandardMaterial the kit loads (tents, benches, stones,
- * torches, props — everything that didn't get converted to Lambert), for
- * the `?debug` panel's metalness slider. Registered once, in the load-time
+ * Every kit material the scene renders (tents, benches, stones, torches,
+ * props — everything that didn't get converted to Lambert), for the `?debug`
+ * panel's metalness and specular sliders. Typed as `MeshStandardMaterial`,
+ * holding the `MeshPhysicalMaterial` subclass the traversal below upgrades
+ * them to. Registered once, in the load-time
  * traversal below, before anything clones them — `tintParts` clones from
  * these, and clones carry `.needsUpdate` recompiles independently, so a
  * slider bound only to these originals would not reach a tent's actual
@@ -27,6 +29,14 @@ export const BARK_MATERIALS: THREE.MeshStandardMaterial[] = []
  * still has a metalness concept at all."
  */
 export const ALL_STANDARD_MATERIALS: THREE.MeshStandardMaterial[] = []
+
+/**
+ * The three tents' own cloned materials, in the order the tents mount, for the
+ * `?debug` panel's tent-roughness slider. A subset of ALL_STANDARD_MATERIALS:
+ * roughness is the one value that is set per-tent rather than kit-wide (see
+ * `tintParts`' caller in CampHero.tsx), so it needs its own list to bind to.
+ */
+export const TENT_MATERIALS: THREE.MeshStandardMaterial[] = []
 
 /** Guards the material-upgrade traversal in useKit() — see its comment. */
 let kitMaterialsUpgraded = false
@@ -103,11 +113,21 @@ export function useKit() {
       }
     })
 
-    // LIGHTING-REWORK (2026-08-17): two passes at the same "white streak"
-    // report — see LIGHTING_TUNING.md for the full history. First pass
-    // stripped the shared roughness/metalness map (real, see the bug
-    // description that used to live here) but the streak was still
-    // visible after that. Second pass, this one:
+    // LIGHTING-REWORK (2026-08-17): third pass at the same "white streak"
+    // report — see LIGHTING_TUNING.md for the full history.
+    //
+    // **Why the first two passes appeared not to work: this block threw.**
+    // `new THREE.MeshPhysicalMaterial().copy(m)` raises
+    // `Cannot read properties of undefined (reading 'x')` on the *first*
+    // mesh it touches (see the note at the copy below), and the throw
+    // escapes into React, so every later `useKit()` call found the
+    // once-only guard already set and did nothing. Net effect on the
+    // shipped scene: nothing was upgraded, no map was stripped past
+    // `Tent_0`, `specularIntensity` was never written, and
+    // `ALL_STANDARD_MATERIALS` stayed empty — which also left the
+    // `?debug` panel's metalness and specular sliders wired to an empty
+    // list. That is why turning either knob "helped but didn't clear it":
+    // neither knob was connected to anything on screen.
     //
     // Roughness controls the *spread* of a specular lobe, not whether one
     // exists. Fresnel reflectance (Schlick's approximation) climbs toward
@@ -153,13 +173,29 @@ export function useKit() {
           const m = mat as THREE.MeshStandardMaterial
           if (m.roughnessMap) m.roughnessMap = null
           if (m.metalnessMap) m.metalnessMap = null
-          const phys = new THREE.MeshPhysicalMaterial().copy(m)
-          // Nowhere near 0: at exactly 0 a couple of surfaces (the
-          // glassware) lost the one highlight that read as "glass" rather
-          // than "solid colour." This is low enough that the grazing
-          // Fresnel term stops reading as a highlight at all — a few
-          // percent of reflectance, not zero.
-          phys.specularIntensity = 0.04
+          // Not `new MeshPhysicalMaterial().copy(m)`: `MeshPhysicalMaterial.copy`
+          // reads physical-only fields off the *source* — `source.clearcoatNormalScale`
+          // is a Vector2 a `MeshStandardMaterial` does not have — and throws
+          // `Cannot read properties of undefined (reading 'x')` on the first
+          // material it sees. Copying with the *standard* material's own `copy`
+          // moves every field the source actually has and leaves the physical-only
+          // ones at their constructor defaults, which is what we want; the defines
+          // have to be put back afterwards because `MeshStandardMaterial.copy`
+          // overwrites them with `{ STANDARD: '' }` and dropping `PHYSICAL` would
+          // compile the standard shader — no `specularIntensity` in it at all.
+          const phys = new THREE.MeshPhysicalMaterial()
+          THREE.MeshStandardMaterial.prototype.copy.call(phys, m)
+          phys.defines = { STANDARD: '', PHYSICAL: '' }
+          // 0.15, measured against the artefact rather than guessed: on the
+          // cot rails (the clearest instance of it — a thin blue metal rail a
+          // couple of metres from the fire) the count of near-neutral bright
+          // pixels in a fixed crop runs 196 at the glTF default of 1.0, 151 at
+          // 0.3, 134 at 0.15 and 113 at 0.04. Under about 0.2 the white edge
+          // stops reading as a highlight; under about 0.1 the tent's weave and
+          // the glassware lose the only specular that gave them a surface at
+          // all. 0.15 is the far end of the first range and the near end of
+          // the second.
+          phys.specularIntensity = 0.15
           phys.needsUpdate = true
           m.dispose()
           ALL_STANDARD_MATERIALS.push(phys)
@@ -480,6 +516,7 @@ export function tintParts(parts: Part[], tint: string, extra?: Partial<THREE.Mes
     // metalness slider would move the un-rendered originals and every
     // tent on screen would sit still.
     ALL_STANDARD_MATERIALS.push(m)
+    TENT_MATERIALS.push(m)
     return { geometry, material: m }
   })
 }

@@ -1,0 +1,384 @@
+/* ==========================================================================
+   The work surface — /projects and every project page.
+
+   The camp is warm paper lit by a fire, and for a long time the written-out
+   version of the same work was that same paper with the fire taken away: a
+   cream page, an Archivo Black poster headline, a grotesque for the labels and
+   a monospace for anything that wanted to look technical. Three faces and a
+   colour scheme borrowed from a different room.
+
+   This is one room instead — a dark, warm reading ground, a single typeface at
+   several weights, and a rule that anything which is not body text is
+   separated by weight and letter-spacing rather than by family.
+
+   Scoped to `data-surface="work"` on the root element (set in App.tsx) rather
+   than to a wrapper, because the footer and the way back to the fire are
+   rendered outside the page element and have to change with it. The campsite
+   keeps its own paper untouched.
+   ========================================================================== */
+
+:root[data-surface='work'] {
+  /* Warm near-black, not a neutral one: the ground keeps a trace of the
+     campsite's brown so the two halves of the site read as one place. */
+  --paper: #14120c;
+  --paper-2: #1a1710;
+  --paper-3: #221e15;
+
+  --ink: #efe9dc;
+  --ink-2: #ada692;
+  --ink-3: #837c6b;
+
+  --line: #302a20;
+  --line-soft: #241f17;
+
+  /* Accents pulled down to something that can sit on a dark ground without
+     vibrating against it. The card rail and the type both use these. */
+  --red: #e0784f;
+  --blue: #a6bcdf;
+  --yellow: #d9c482;
+  /* The label colour: a pale olive, on every kicker and section mark. */
+  --olive: #c6be8b;
+
+  --card: #1a1710;
+  --card-hover: #211d14;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.02), 0 24px 48px -30px rgba(0, 0, 0, 0.9);
+
+  /* One face, everywhere. The three variables are kept so that nothing
+     downstream has to know they now agree. */
+  --font-sans: 'Inter', 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: var(--font-sans);
+
+  /* There is no navigation bar any more — it went with Nav.tsx — but the
+     page's own top padding and every sticky offset were still reserving a
+     bar's worth of height for one. That reserve is the empty strip above the
+     filter row, and the gap the row stuck to on the way up. */
+  --nav-h: 0px;
+}
+
+/* The way back to the fire rides in the flow here rather than floating: the
+   filter row is sticky at the very top of the viewport now, and a fixed pill
+   in that corner sat directly on the search field. */
+:root[data-surface='work'] .tofire {
+  position: static;
+  margin: 20px 0 0 var(--gutter);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  border-radius: 8px;
+  border-color: var(--line);
+  background: var(--paper-2);
+}
+
+/* -------------------------------------------------------------- type scale */
+
+:root[data-surface='work'] .display {
+  font-weight: 400;
+  line-height: 1.06;
+  letter-spacing: -0.028em;
+  text-transform: none;
+}
+
+:root[data-surface='work'] .page-head h1 {
+  font-size: clamp(2.2rem, 4.6vw, 3.5rem);
+}
+
+/* Headline left, the paragraph set beside it rather than under it — the
+   headline is the statement and the paragraph is its footnote, and stacked
+   they read as two statements of equal weight. */
+:root[data-surface='work'] .page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  column-gap: clamp(32px, 6vw, 96px);
+  align-items: end;
+  padding-top: clamp(30px, 5vw, 62px);
+}
+
+:root[data-surface='work'] .page-head .eyebrow {
+  grid-column: 1 / -1;
+}
+
+:root[data-surface='work'] .page-head p {
+  margin-top: 0;
+  font-size: 0.95rem;
+  line-height: 1.62;
+  max-width: 46ch;
+}
+
+@media (max-width: 820px) {
+  :root[data-surface='work'] .page-head {
+    grid-template-columns: 1fr;
+    row-gap: 20px;
+  }
+}
+
+:root[data-surface='work'] .eyebrow,
+:root[data-surface='work'] .mono {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--olive);
+}
+
+:root[data-surface='work'] .eyebrow {
+  letter-spacing: 0.22em;
+  font-size: 0.66rem;
+}
+
+/* The rule that trailed off every kicker belonged to the poster layout. The
+   label stands on its own here. */
+:root[data-surface='work'] .eyebrow::after {
+  display: none;
+}
+
+/* ----------------------------------------------------------- the filter row */
+
+:root[data-surface='work'] .toolbar {
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  border-top: 0;
+  padding-block: 12px;
+}
+
+:root[data-surface='work'] .search input,
+:root[data-surface='work'] .select select {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: 8px;
+  background: var(--paper-2);
+}
+
+:root[data-surface='work'] .search input::placeholder {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.8rem;
+}
+
+:root[data-surface='work'] .segmented {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+:root[data-surface='work'] .segmented button,
+:root[data-surface='work'] .tagbar button,
+:root[data-surface='work'] .results,
+:root[data-surface='work'] .search kbd {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+:root[data-surface='work'] .segmented button.is-active {
+  background: var(--olive);
+  color: #14120c;
+}
+
+:root[data-surface='work'] .tagbar button {
+  border-radius: 999px;
+}
+
+:root[data-surface='work'] .tagbar button.is-active {
+  background: var(--olive);
+  border-color: var(--olive);
+  color: #14120c;
+}
+
+/* ----------------------------------------------------------------- the grid */
+
+:root[data-surface='work'] .card,
+:root[data-surface='work'] .panel,
+:root[data-surface='work'] .empty,
+:root[data-surface='work'] .gallery figure {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+:root[data-surface='work'] .card:hover {
+  border-color: color-mix(in srgb, var(--olive) 40%, var(--line));
+}
+
+:root[data-surface='work'] .card__title {
+  font-family: var(--font-sans);
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--blue);
+}
+
+:root[data-surface='work'] .card__sub,
+:root[data-surface='work'] .card__blurb {
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+:root[data-surface='work'] .card__tag,
+:root[data-surface='work'] .card__type,
+:root[data-surface='work'] .card__status,
+:root[data-surface='work'] .card__clip,
+:root[data-surface='work'] .card__year,
+:root[data-surface='work'] .chip {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+:root[data-surface='work'] .card__tag,
+:root[data-surface='work'] .chip {
+  border-radius: 999px;
+}
+
+:root[data-surface='work'] .card__type,
+:root[data-surface='work'] .card__status,
+:root[data-surface='work'] .card__clip {
+  border-radius: 6px;
+}
+
+:root[data-surface='work'] .empty b {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------- a project's page */
+
+:root[data-surface='work'] .backlink,
+:root[data-surface='work'] .detail-meta dt,
+:root[data-surface='work'] .panel h3,
+:root[data-surface='work'] .prose h2,
+:root[data-surface='work'] .pager small {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+:root[data-surface='work'] .panel h3,
+:root[data-surface='work'] .prose h2 {
+  color: var(--olive);
+}
+
+:root[data-surface='work'] .prose h2::after {
+  display: none;
+}
+
+:root[data-surface='work'] .detail-title {
+  font-size: clamp(2.1rem, 5vw, 3.6rem);
+}
+
+:root[data-surface='work'] .detail-meta {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+:root[data-surface='work'] .detail-meta > div {
+  background: var(--card);
+}
+
+:root[data-surface='work'] .pager strong {
+  font-weight: 600;
+}
+
+/* No bar to clear any more, so the sticky column only needs breathing room. */
+:root[data-surface='work'] .aside {
+  top: 28px;
+}
+
+/* ------------------------------------------------------------------ footer */
+
+:root[data-surface='work'] .footer__cta h2 {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+:root[data-surface='work'] .footer__links a,
+:root[data-surface='work'] .footer__links span,
+:root[data-surface='work'] .footer__base {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+/* ============================================================= the lightbox */
+
+/* A gallery shot on a tool's page is a screenshot of an editor window: what is
+   being shown is a panel of labelled controls, and at a third of the page
+   width those labels cannot be read — which makes the picture decorative when
+   it is meant to be the evidence. Pressing one opens it at whatever size the
+   viewport has. */
+
+.shot-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4vw, 48px);
+  background: rgba(8, 7, 4, 0.92);
+  backdrop-filter: blur(6px);
+  animation: lightbox-in 0.18s var(--ease);
+}
+
+@keyframes lightbox-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbox {
+    animation: none;
+  }
+}
+
+.lightbox img {
+  max-width: 100%;
+  max-height: calc(100vh - 160px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+}
+
+.lightbox figure {
+  margin: 0;
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+.lightbox figcaption {
+  font-family: var(--font-sans);
+  font-size: 0.84rem;
+  color: #cdc6b6;
+  text-align: center;
+  max-width: 70ch;
+}
+
+.lightbox__close {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  color: #efe9dc;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(20, 18, 12, 0.8);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.lightbox__close:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(40, 36, 26, 0.9);
+}

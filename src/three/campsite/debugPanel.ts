@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { BloomEffect, BrightnessContrastEffect, VignetteEffect } from 'postprocessing'
 import type { SplitToneEffect } from './grade'
 import { TREE_GAIN, GRASS_GAIN } from './debugGain'
-import { ALL_STANDARD_MATERIALS, BARK_MATERIALS } from './useKit'
+import { ALL_STANDARD_MATERIALS, BARK_MATERIALS, TENT_MATERIALS } from './useKit'
 import { TREE_CANOPY_SHADERS } from './wind'
 
 /* -------------------------------------------------------------------------- */
@@ -181,7 +181,7 @@ export async function mountDebugPanel(handles: DebugHandles) {
   }
 
   if (ALL_STANDARD_MATERIALS.length) {
-    const f = gui.addFolder('Metalness (all standard materials)')
+    const f = gui.addFolder('White edge fix (specular / roughness)')
     // LIGHTING-REWORK (2026-08-17): for testing whether metalness is the
     // "white streak" root cause. It isn't — checked the source glb
     // directly, `metallicFactor` is 0 on every material in the kit, and
@@ -193,17 +193,51 @@ export async function mountDebugPanel(handles: DebugHandles) {
     f.add(proxy, 'metalness', 0, 1, 0.01).onChange((v: number) => {
       for (const m of ALL_STANDARD_MATERIALS) m.metalness = v
     })
-    // The actual lever: Fresnel reflectance climbs toward white at grazing
-    // angles regardless of roughness (that fix, tried first, helped but
-    // didn't clear it — see LIGHTING_TUNING.md). specularIntensity scales
-    // that reflectance term directly, independent of every light in the
-    // scene. All kit materials were upgraded to MeshPhysicalMaterial and
-    // pinned to 0.04 by default specifically so this control exists.
+    // The actual lever, and as of this session a live one: Fresnel
+    // reflectance climbs toward white at grazing angles regardless of
+    // roughness, and `specularIntensity` scales that reflectance term
+    // directly, independent of every light in the scene. This slider used to
+    // move nothing — the traversal that upgrades the kit to
+    // MeshPhysicalMaterial and fills ALL_STANDARD_MATERIALS threw on its
+    // first material, so the list was empty and this whole folder never even
+    // mounted. See LIGHTING_TUNING.md, "White edge outline on props".
+    //
+    // Drag it to 1.0 (the glTF default, and what the scene was really
+    // running at) to put the artefact back: a white outline along the cot
+    // rails, the tent trim and the guy-ropes, brightest at grazing angles
+    // and shifting as the camera turns.
     const spec = ALL_STANDARD_MATERIALS[0] as unknown as { specularIntensity: number }
-    const specProxy = { specularIntensity: spec.specularIntensity ?? 0.04 }
-    f.add(specProxy, 'specularIntensity', 0, 1, 0.01).onChange((v: number) => {
-      for (const m of ALL_STANDARD_MATERIALS) (m as unknown as { specularIntensity: number }).specularIntensity = v
-    })
+    const specProxy = { specularIntensity: spec.specularIntensity ?? 0.15 }
+    const specCtrl = f
+      .add(specProxy, 'specularIntensity', 0, 1, 0.01)
+      .name('specularIntensity (0.15 = fixed, 1 = artefact)')
+      .onChange((v: number) => {
+        for (const m of ALL_STANDARD_MATERIALS) (m as unknown as { specularIntensity: number }).specularIntensity = v
+      })
+
+    // Tent roughness is separate because it is set per-tent by `tintParts`'
+    // caller, not kit-wide. It was pushed to 1.0 — a material's matte
+    // ceiling, no GGX highlight at all — as a workaround while the specular
+    // clamp above was silently dead. With the clamp live, 0.9 is clean and
+    // is what gives the canvas its weave, seams and sag back.
+    let roughCtrl: { setValue: (v: number) => void } | null = null
+    if (TENT_MATERIALS.length) {
+      const roughProxy = { roughness: TENT_MATERIALS[0].roughness }
+      roughCtrl = f
+        .add(roughProxy, 'roughness', 0.5, 1, 0.01)
+        .name('tent roughness (0.9 = fixed, 1 = flat)')
+        .onChange((v: number) => {
+          for (const m of TENT_MATERIALS) m.roughness = v
+        }) as unknown as { setValue: (v: number) => void }
+    }
+
+    // A/B in one click, since the two values only read as a pair.
+    const setBoth = (specular: number, roughness: number) => {
+      specCtrl.setValue(specular)
+      roughCtrl?.setValue(roughness)
+    }
+    f.add({ before: () => setBoth(1, 1) }, 'before').name('A/B: before (broken — 1.0 / 1.0)')
+    f.add({ after: () => setBoth(0.15, 0.9) }, 'after').name('A/B: after (fixed — 0.15 / 0.9)')
   }
 
   const fogFolder = gui.addFolder('Fog (read-only — baked into GLSL, edit fog.ts)')
@@ -242,6 +276,12 @@ export async function mountDebugPanel(handles: DebugHandles) {
         }
         if (BARK_MATERIALS.length)
           console.log('bark', { color: `#${BARK_MATERIALS[0].color.getHexString()}`, emissiveIntensity: BARK_MATERIALS[0].emissiveIntensity })
+        if (ALL_STANDARD_MATERIALS.length)
+          console.log('kit materials', {
+            specularIntensity: (ALL_STANDARD_MATERIALS[0] as unknown as { specularIntensity: number }).specularIntensity,
+            metalness: ALL_STANDARD_MATERIALS[0].metalness,
+            tentRoughness: TENT_MATERIALS[0]?.roughness,
+          })
         if (handles.constants) console.log('constants at load (NIGHT, FIRELIGHT, ...)', handles.constants)
         console.log('fog.ts constants: FOG_NEAR=20 FOG_FAR=58 — edit the file, these are baked into GLSL')
       },

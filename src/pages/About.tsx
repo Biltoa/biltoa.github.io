@@ -6,9 +6,12 @@ import { useReveal } from '../lib/hooks'
 import { attachScrollDriver } from '../lib/scroll'
 import { isMuted, resumeAudio, setMuted, stopAudio, subscribeAudio } from '../lib/audio'
 import CampLoader, { type LoadStage } from '../components/CampLoader'
+import type { PageScreenRect } from '../three/campsite/Book'
 
 const CampHero = lazy(() => import('../three/CampHero'))
 const CampUI = lazy(() => import('../components/CampUI'))
+const BookPlayer = lazy(() => import('../components/BookPlayer'))
+const BookZoom = lazy(() => import('../components/BookZoom'))
 
 /**
  * Longest the curtain is allowed to stay up.
@@ -125,12 +128,55 @@ export default function About() {
 
   const inRoom = entered !== null
 
+  /** Mirrors `playingFrom` for handlers that must not re-bind when it changes. */
+  const playingRef = useRef<PageScreenRect | null>(null)
+  /** Same, for the picture overlay. */
+  const zoomRef = useRef(false)
+
   // Whether the journal in the current tent has been clicked open yet. Reset
   // the moment `entered` clears — CampHero only ever sets this to true (on the
   // click), so this is also what makes it false again for the next tent.
   const [bookRequested, setBookRequested] = useState(false)
   useEffect(() => {
     if (entered === null) setBookRequested(false)
+  }, [entered])
+
+  /**
+   * Where the gameplay build is playing from, or null if it is not.
+   *
+   * Holds the journal page's footprint on screen at the moment it was pressed,
+   * because the player opens out of that rectangle rather than out of nowhere.
+   * Leaving the tent puts it away — the page it grew from is no longer there.
+   */
+  /** A picture in the journal being read closer, or null. */
+  const [zoomed, setZoomed] = useState<{ src: string; from: PageScreenRect } | null>(null)
+  useEffect(() => {
+    if (entered === null) setZoomed(null)
+  }, [entered])
+
+  const [playingFrom, setPlayingFrom] = useState<PageScreenRect | null>(
+    // Dev-only: `?play=1` opens the build straight away, from a rectangle where
+    // the right-hand page usually lands. The transition and the loader are
+    // otherwise only reachable by walking in, opening the journal, turning to
+    // the page and pressing it — which is four animations to look at one.
+    () => {
+      if (!import.meta.env.DEV) return null
+      if (new URLSearchParams(window.location.search).get('play') !== '1') return null
+      const w = window.innerWidth
+      const h = window.innerHeight
+      return { x: w * 0.52, y: h * 0.24, w: w * 0.29, h: h * 0.62 }
+    }
+  )
+  useEffect(() => {
+    playingRef.current = playingFrom
+  }, [playingFrom])
+
+  useEffect(() => {
+    zoomRef.current = zoomed !== null
+  }, [zoomed])
+
+  useEffect(() => {
+    if (entered === null) setPlayingFrom(null)
   }, [entered])
 
   // Walking into a tent takes over the viewport, so the page must not scroll
@@ -140,7 +186,16 @@ export default function About() {
     const y = window.scrollY
     const { overflow } = document.body.style
     document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setEntered(null)
+    const onKey = (e: KeyboardEvent) => {
+      // The player owns Escape while it is open; it closes itself and hands the
+      // key back. Without this, one press did both and the reader was outside
+      // the tent before the build had finished putting itself away.
+      //
+      // Read through a ref, not through the closure: this effect also takes the
+      // scroll position over, and re-running it whenever the player opens or
+      // closes puts a scrollTo into the middle of the transition.
+      if (e.key === 'Escape' && playingRef.current === null && !zoomRef.current) setEntered(null)
+    }
     window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = overflow
@@ -163,10 +218,17 @@ export default function About() {
             <CampHero
               entered={entered}
               onEnter={setEntered}
-              onNavigate={(to) => {
+              onNavigate={(to, from) => {
+                // Not a route. The build opens out of the page inside the tent,
+                // so the campsite stays exactly where it is.
+                if (to.startsWith('play:')) {
+                  if (from) setPlayingFrom(from)
+                  return
+                }
                 setEntered(null)
                 navigate(to)
               }}
+              onZoom={(src, from) => setZoomed({ src, from })}
               onBookOpenRequest={() => setBookRequested(true)}
               onExit={() => setEntered(null)}
               onProgress={handleProgress}
@@ -175,8 +237,24 @@ export default function About() {
           </Suspense>
 
           <Suspense fallback={null}>
-            <CampUI active inRoom={inRoom} showBookHint={inRoom && !bookRequested} />
+            <CampUI
+              active
+              inRoom={inRoom}
+              showBookHint={inRoom && !bookRequested && playingFrom === null}
+            />
           </Suspense>
+
+          {playingFrom && (
+            <Suspense fallback={null}>
+              <BookPlayer from={playingFrom} onClose={() => setPlayingFrom(null)} />
+            </Suspense>
+          )}
+
+          {zoomed && (
+            <Suspense fallback={null}>
+              <BookZoom src={zoomed.src} from={zoomed.from} onClose={() => setZoomed(null)} />
+            </Suspense>
+          )}
 
           <button
             className="tentswitch audioswitch"
@@ -189,9 +267,9 @@ export default function About() {
 
           <button
             className="doorback"
-            data-hidden={!inRoom}
+            data-hidden={!inRoom || playingFrom !== null || zoomed !== null}
             onClick={() => setEntered(null)}
-            tabIndex={inRoom ? 0 : -1}
+            tabIndex={inRoom && playingFrom === null && zoomed === null ? 0 : -1}
           >
             ← Back to the fire <kbd>Esc</kbd>
           </button>
@@ -207,7 +285,7 @@ export default function About() {
             <p className="eyebrow">About</p>
             <div className="about-grid" style={{ marginTop: 34 }}>
               <div>
-                {profile.summary.map((para) => (
+                {[...profile.summary, ...profile.whatIBuild].map((para) => (
                   <p key={para.slice(0, 24)}>{para}</p>
                 ))}
               </div>
@@ -219,11 +297,7 @@ export default function About() {
                 </div>
                 <div>
                   <dt>Focus</dt>
-                  <dd>Gameplay systems · Unity editor tooling</dd>
-                </div>
-                <div>
-                  <dt>Engine</dt>
-                  <dd>Unity 3D (C#), URP</dd>
+                  <dd>Gameplay systems · Unity editor tools</dd>
                 </div>
                 <div>
                   <dt>Platforms</dt>
@@ -231,7 +305,7 @@ export default function About() {
                 </div>
                 <div>
                   <dt>Currently</dt>
-                  <dd>Unity Developer at Mad Hook</dd>
+                  <dd>Pursuing independent projects</dd>
                 </div>
                 <div>
                   <dt>Contact</dt>
@@ -288,11 +362,6 @@ export default function About() {
                 </p>
               </Link>
             ))}
-          </div>
-          <div style={{ marginTop: 26 }}>
-            <Link className="btn" to="/projects">
-              All projects & tools →
-            </Link>
           </div>
         </div>
       </section>

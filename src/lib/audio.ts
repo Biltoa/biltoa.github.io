@@ -216,11 +216,97 @@ export function sfxEnter() {
   blip({ freq: 180, to: 90, duration: 0.7, type: 'sine', gain: 0.06 })
 }
 
+/* --------------------------------------------------------------- the book */
+
+/**
+ * A sheet of paper moving.
+ *
+ * Filtered noise with a fast attack and a swept band, which is most of what a
+ * page turn is: a broadband rustle whose centre frequency rises as the sheet
+ * comes up off the block and falls again as it lands. Two of them, offset, so
+ * it reads as paper against paper rather than as one hiss.
+ */
+function paper({
+  duration = 0.42,
+  from = 900,
+  to = 2600,
+  gain = 0.11,
+  q = 0.9,
+  delay = 0,
+}: {
+  duration?: number
+  from?: number
+  to?: number
+  gain?: number
+  q?: number
+  delay?: number
+} = {}) {
+  const c = ctx
+  if (!c || !master || muted) return
+
+  const now = c.currentTime + delay
+  const src = c.createBufferSource()
+  src.buffer = noiseBuffer(c, Math.max(duration + 0.2, 0.6))
+
+  // Brown noise is too dark on its own for paper — the band-pass is what puts
+  // the sibilance back without making it sound like tape hiss.
+  const band = c.createBiquadFilter()
+  band.type = 'bandpass'
+  band.Q.value = q
+  band.frequency.setValueAtTime(from, now)
+  band.frequency.exponentialRampToValueAtTime(to, now + duration * 0.55)
+  band.frequency.exponentialRampToValueAtTime(from * 0.7, now + duration)
+
+  const g = c.createGain()
+  g.gain.setValueAtTime(0.0001, now)
+  g.gain.exponentialRampToValueAtTime(gain, now + 0.045)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + duration)
+
+  src.connect(band).connect(g).connect(master)
+  src.start(now)
+  src.stop(now + duration + 0.1)
+}
+
+/** A leaf going over. */
+export function sfxPageTurn() {
+  paper({ duration: 0.40, from: 800, to: 2500, gain: 0.10 })
+  paper({ duration: 0.26, from: 1600, to: 3400, gain: 0.05, q: 1.6, delay: 0.06 })
+}
+
+/**
+ * The cover lifting.
+ *
+ * Leather and board rather than paper, so the sweep runs the other way and a
+ * low body note sits underneath it — a heavy thing being moved, followed by the
+ * block of pages settling open.
+ */
+export function sfxBookOpen() {
+  paper({ duration: 0.55, from: 2200, to: 700, gain: 0.09, q: 0.7 })
+  blip({ freq: 120, to: 74, duration: 0.5, type: 'sine', gain: 0.05 })
+  paper({ duration: 0.3, from: 900, to: 1800, gain: 0.05, delay: 0.22 })
+}
+
+/** The covers meeting. A softer, deader version of the same thing. */
+export function sfxBookClose() {
+  paper({ duration: 0.34, from: 1800, to: 600, gain: 0.10, q: 0.7 })
+  blip({ freq: 96, to: 58, duration: 0.34, type: 'sine', gain: 0.07 })
+}
+
 export function sfxExit() {
   blip({ freq: 320, to: 180, duration: 0.4, type: 'sine', gain: 0.05 })
 }
 
 /* ------------------------------------------------------------------ control */
+
+/**
+ * The campsite's own audio context, if one has been created.
+ *
+ * Exposed so the Unity host can tell the camp's context apart from the ones the
+ * engine opens — it closes everything it finds except this.
+ */
+export function campAudioContext(): AudioContext | null {
+  return ctx
+}
 
 export function isMuted() {
   return muted

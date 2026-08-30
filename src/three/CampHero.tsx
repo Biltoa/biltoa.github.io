@@ -27,7 +27,7 @@ import { applyParallax } from './campsite/parallax'
 import { installHeightFog } from './campsite/fog'
 import { fireFlicker } from './campsite/fire'
 import { SplitToneEffect } from './campsite/grade'
-import Book from './campsite/Book'
+import Book, { type PageScreenRect } from './campsite/Book'
 import {
   Campfire,
   FIRELIGHT,
@@ -282,16 +282,35 @@ const BOOK_WIDTH = 0.6
 
 /**
  * Reading pose, relative to the journal: how far back toward the door the eye
- * sits and how far above it. Roughly 57 degrees down from horizontal — steep
- * enough that both pages are square to the lens instead of raking away, which
- * is what made the far page hard to read.
+ * sits and how far above it. Roughly 66 degrees down from horizontal — near
+ * enough over the top of the spread that the type is square to the lens, while
+ * keeping enough of an angle that it still reads as a book on a bench rather
+ * than as a flat scan of one. It was 57, and at 57 the head of both pages
+ * raked away far enough to cost legibility.
  *
  * The distance is set by the page, not by the pitch: closer than about 0.8m
  * the open spread is deeper than the frame is tall and the foot of both pages
  * is cropped.
  */
-const READ_BACK = 0.44
-const READ_RISE = 0.67
+const READ_BACK = 0.33
+const READ_RISE = 0.73
+
+/**
+ * How far the reading pose drops below the pitch line, in metres.
+ *
+ * The journal was not centred in its own shot: shut, it left 190px of tent
+ * above it and 63px below on a 900px viewport, so it read as having slid down
+ * out of frame. The eye and the aim point are dropped *together*, which leaves
+ * the view direction — and so the angle the spread is read at — untouched and
+ * simply moves the book up the frame. Both gaps scale with frame height, so
+ * the balance holds at any aspect.
+ *
+ * Calibrated on the About tent with tools/qa/measure.cjs. At -0.088 the shut
+ * book sits at about 104 above / 91 below and the open spread at 122 / 123;
+ * the two states cannot be perfect at once because the spread is shallower
+ * than the board, so this splits them.
+ */
+const READ_FRAME_LIFT = -0.088
 
 /**
  * Height the lens holds while it is threading the doorway.
@@ -345,6 +364,20 @@ function tentFrame(index: number) {
     /** The journal, and the pose that reads it. */
     book: at(BOOK_LOCAL.x, BOOK_LOCAL.z),
     readEye: at(BOOK_LOCAL.x, BOOK_LOCAL.z + READ_BACK),
+    /**
+     * Where the lens is aimed as it settles onto the spread — a little past
+     * the book on the way in, a little short of it once it has arrived.
+     *
+     * Both are struck along the *tent's* forward axis rather than by nudging
+     * the world Z of `book`. A raw Z offset is only the same thing for the
+     * middle tent: the outer two are turned 26 degrees to face the fire, so a
+     * few centimetres of world Z lands sideways of their books and yaws the
+     * camera off the spine by two or three degrees. That is exactly the tilt
+     * that made the About and Projects journals sit crooked on the table while
+     * the Gameplay one looked square.
+     */
+    bookLookFar: at(BOOK_LOCAL.x, BOOK_LOCAL.z + 0.06),
+    bookLookNear: at(BOOK_LOCAL.x, BOOK_LOCAL.z - 0.02),
   }
 }
 
@@ -389,6 +422,61 @@ function makeDiscMask(stops: [number, number][]) {
   ctx.fillRect(0, 0, size, size)
   return new THREE.CanvasTexture(c)
 }
+
+/**
+ * A soft-edged rounded rectangle, for the shadow under something rectangular.
+ *
+ * The disc mask is right under a tent, whose footprint is roughly round from
+ * above and whose shadow nobody reads as a shape. Under the journal it is
+ * wrong in a way that is immediately legible: a book is a slab, and a perfect
+ * circle of shade around a slab is the one thing in the tent that announces
+ * itself as a decal. Drawn with a stack of expanding blurred rectangles rather
+ * than one blur pass, because a single large `shadowBlur` on a rounded rect
+ * comes back banded on some drivers.
+ */
+function makeSlabMask() {
+  const size = 256
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const ctx = c.getContext('2d')!
+  const img = ctx.createImageData(size, size)
+
+  // Written a pixel at a time from the rounded-rectangle distance field rather
+  // than drawn and blurred. Both canvas blurs were tried first and neither is
+  // dependable here: `ctx.filter` is missing or ignored in some of the
+  // contexts this runs in — including the headless one the screenshots come
+  // out of — and stacking translucent rects to fake it saturates in the middle
+  // and leaves a hard edge where the stack ends, which is the giveaway this
+  // whole texture exists to avoid.
+  const half = size / 2
+  // The solid core, as a fraction of the half-size, and the penumbra past it.
+  const coreX = half * 0.64
+  const coreY = half * 0.58
+  const round = half * 0.08
+  const soft = half * 0.3
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Distance outside the rounded rect; zero anywhere inside it.
+      const dx = Math.max(Math.abs(x + 0.5 - half) - (coreX - round), 0)
+      const dy = Math.max(Math.abs(y + 0.5 - half) - (coreY - round), 0)
+      const d = Math.max(0, Math.hypot(dx, dy) - round)
+      const t = Math.min(1, d / soft)
+      // Squared falloff: a contact shadow is dark and tight where the object
+      // meets the surface and gives up quickly, not a linear ramp.
+      const a = (1 - t) * (1 - t)
+      const i = (y * size + x) * 4
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255
+      img.data[i + 3] = Math.round(a * 255)
+    }
+  }
+
+  ctx.putImageData(img, 0, 0)
+  return new THREE.CanvasTexture(c)
+}
+
+/** The journal's own shadow: a slab's, not a disc's. */
+const slabShadow = /* @__PURE__ */ (() => (typeof document === 'undefined' ? null : makeSlabMask()))()
 
 /** One texture for every tent's contact shadow — it never changes. */
 const contactShadow = /* @__PURE__ */ (() =>
@@ -1313,6 +1401,7 @@ function Tent({
   onEnter,
   onHover,
   onNavigate,
+  onZoom,
   onBookOpenRequest,
   onClose,
 }: {
@@ -1332,7 +1421,8 @@ function Tent({
   bookOpen: React.RefObject<number>
   onEnter: (i: TentIndex) => void
   onHover: (i: TentIndex | null, source: 'tent' | 'label') => void
-  onNavigate: (to: string) => void
+  onNavigate: (to: string, from?: PageScreenRect) => void
+  onZoom?: (src: string, from: PageScreenRect) => void
   /** Fired when the reader clicks this tent's closed journal. */
   onBookOpenRequest: () => void
   /** Fired when the journal is closed from its own edge page. */
@@ -1385,20 +1475,20 @@ function Tent({
     // material (checked the source glb) — this was never a metal-material
     // bug, just a specular lobe sized for a dimmer scene.
     //
-    // LIGHTING-REWORK (2026-08-17): 0.9 -> 1.0. The streak was still visible
-    // at 0.9 even with moon/rim/hemisphere/ambient all zeroed — the
-    // remaining culprit is the door torches, which sit close enough to a
-    // tent's own guy-ropes that any real roughness<1 specular lobe still
-    // catches them at grazing incidence. The user asked for this fixed on
-    // the material rather than by touching torch light values. Fully flat
-    // (no GGX highlight at all — 1.0 is the material's matte ceiling, not
-    // just "very rough") kills it regardless of how bright any nearby
-    // light gets. Does not touch the hover highlight: that's a wholly
+    // LIGHTING-REWORK (2026-08-17): 0.9 -> 1.0, then back to 0.9. Flattening
+    // the material to its matte ceiling was an attempt at the white edge on
+    // the ropes and trim while `specularIntensity` in useKit() was silently
+    // never being applied (that block threw — see the note there). With the
+    // reflectance itself now pinned at 0.15 the edge is gone at 0.9 too, and
+    // 0.9 is what puts the weave, the seams and the sag back on the canvas:
+    // at 1.0 every wall is one flat panel of colour again, which is exactly
+    // what the note above this one was written about. Does not touch the
+    // hover highlight either way: that's a wholly
     // separate unlit emissive shell (`makeOutlineShell`, see
     // campsite/outline.ts) plus an emissive wash on `glowParts` below,
     // neither of which reads `roughness` at all.
     const list = tintParts(kit.parts(TENT.node), TENT_TINT[index], {
-      roughness: 1.0,
+      roughness: 0.9,
       side: THREE.DoubleSide,
       emissive: new THREE.Color('#000000'),
     })
@@ -1445,7 +1535,19 @@ function Tent({
     const g = group.current
     if (!g) return
     const near = clamp01(1 - Math.abs(focus.current - index))
-    g.position.y += (near * 0.05 - g.position.y) * damp(5, delta)
+    /*
+      The focus rise is a lobby affordance, and it has to stop at the doorway.
+
+      It lifts whichever tent the scroll is nearest by five centimetres, and the
+      journal is inside that tent — so the middle tent, which is what the scroll
+      rests on by default and what the focus is frozen at the moment a tent is
+      entered, read its book five centimetres higher than the other two. At the
+      reading pose that is a book seven per cent larger and fifty pixels up the
+      frame, which is why the Gameplay journal alone came within a few pixels of
+      the top of the shot while About and Projects sat centred.
+    */
+    const rise = entered === null ? near * 0.05 : 0
+    g.position.y += (rise - g.position.y) * damp(5, delta)
 
     // How far in the camera is. Held at zero for the two tents it is not
     // walking into, so their interiors never light.
@@ -1544,7 +1646,12 @@ function Tent({
       // journal was the frame the bench was most blown out in.
       const g = Math.pow(k, 0.55)
       const l = glowLight.current
-      l.position.set(0, THREE.MathUtils.lerp(1.15, 1.5, g), THREE.MathUtils.lerp(-0.3, 0.95, g))
+      // 1.15 hung the lamp level with the bench, and the doorway is a low
+      // opening looking straight at it — so from the clearing the one thing
+      // visible through the door was a blown-out white bar. Lifting it puts the
+      // hotspot on the inside of the roof instead, where the door cannot see
+      // it, and the fabric still glows because that is the wall it is lighting.
+      l.position.set(0, THREE.MathUtils.lerp(1.62, 1.5, g), THREE.MathUtils.lerp(-0.3, 0.95, g))
       // `here` scales rather than unmounts — see MOUNTED_POINT_LIGHTS. A light
       // at zero intensity contributes exactly nothing, which is the same
       // picture the old `{here && …}` produced, at none of the cost.
@@ -1605,7 +1712,7 @@ function Tent({
           MOUNTED_POINT_LIGHTS. */}
       <pointLight
           ref={glowLight}
-          position={[0, 1.15, -0.3]}
+          position={[0, 1.62, -0.3]}
           /*
             Warm, but carrying some of the tent's own colour.
 
@@ -1681,12 +1788,12 @@ function Tent({
           rotation-x={-Math.PI / 2}
           renderOrder={1}
         >
-          <planeGeometry args={[0.84, 0.64]} />
+          <planeGeometry args={[0.56, 0.46]} />
           <meshBasicMaterial
-            alphaMap={contactShadow ?? undefined}
+            alphaMap={slabShadow ?? undefined}
             color="#140b06"
             transparent
-            opacity={0.34}
+            opacity={0.3}
             depthWrite={false}
           />
         </mesh>
@@ -1702,6 +1809,7 @@ function Tent({
           accent={TENT_NEON[index]}
           live={entering}
           onNavigate={onNavigate}
+          onZoom={onZoom}
           onOpenRequest={onBookOpenRequest}
           onClose={onClose}
         />
@@ -1949,11 +2057,13 @@ function CameraRig({
         THREE.MathUtils.lerp(DUCK_Y, BOOK_LOCAL.y + READ_RISE, e) + Math.sin(Math.PI * e) * 0.15,
         THREE.MathUtils.lerp(frame.inside.z, frame.readEye.z, e)
       )
-      look.set(
-        frame.book.x,
-        THREE.MathUtils.lerp(BOOK_LOCAL.y + 0.02, BOOK_LOCAL.y + 0.01, e),
-        THREE.MathUtils.lerp(frame.book.z + 0.06, frame.book.z - 0.02, e)
-      )
+      look.copy(frame.bookLookFar).lerp(frame.bookLookNear, e)
+      look.y = THREE.MathUtils.lerp(BOOK_LOCAL.y + 0.02, BOOK_LOCAL.y + 0.01, e)
+      // Faded in over the last leg, so the arrival is still one move. See
+      // READ_FRAME_LIFT — both are raised by the same amount, which shifts the
+      // frame without touching the pitch.
+      pos.y += READ_FRAME_LIFT * e
+      look.y += READ_FRAME_LIFT * e
       fov = THREE.MathUtils.lerp(39, 42, e)
     }
 
@@ -1984,6 +2094,18 @@ function CameraRig({
       smoothLook.lerp(look, k)
     }
     camera.lookAt(smoothLook)
+
+    // Dev-only: the reading pose is the one thing in here that cannot be read
+    // off a screenshot, and the QA harness needs to be able to tell a framing
+    // difference between tents from a camera difference.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __cam?: unknown }).__cam = {
+        idx,
+        pos: camera.position.toArray(),
+        look: smoothLook.toArray(),
+        fov: cam.fov,
+      }
+    }
   })
 
   return null
@@ -2012,13 +2134,15 @@ function Scene({
   entered,
   onEnter,
   onNavigate,
+  onZoom,
   onBookOpenRequest,
   onExit,
 }: {
   onFocus: (i: TentIndex) => void
   entered: number | null
   onEnter: (i: TentIndex) => void
-  onNavigate: (to: string) => void
+  onNavigate: (to: string, from?: PageScreenRect) => void
+  onZoom?: (src: string, from: PageScreenRect) => void
   onBookOpenRequest?: () => void
   onExit?: () => void
 }) {
@@ -2401,6 +2525,7 @@ function Scene({
           onEnter={onEnter}
           onHover={handleHover}
           onNavigate={onNavigate}
+          onZoom={onZoom}
           onBookOpenRequest={() => {
             wantOpen.current = true
             onBookOpenRequest?.()
@@ -2627,28 +2752,45 @@ function pixelBudgetDpr() {
  * in the tree.
  */
 function LoadTracker({ onProgress }: { onProgress?: (p: number) => void }) {
-  const { progress } = useProgress()
   /*
-    Through a ref, and the dependency list is `[progress]` alone.
+    Polled off the store rather than subscribed to it.
 
-    With `onProgress` in the list this was an infinite update loop, and a real
-    one — React was throwing "Maximum update depth exceeded" during load,
-    intermittently, on maybe one run in three. The cycle: drei's `useProgress`
-    store ticks, the effect fires, the callback sets state on the page above,
-    that render hands down a *new* `onProgress` closure, the changed dependency
-    fires the effect again, which sets state again. Nothing in it is throttled
-    except React's own counter.
+    The previous version called `useProgress()`, which subscribes this component
+    to drei's store — and that store is written from inside three's
+    `DefaultLoadingManager.onProgress`, which fires once per finished item. So a
+    burst of textures finishing in one tick ran: manager fires, store writes,
+    this component re-renders, the page above it sets state, the tree re-renders,
+    repeat. React's update-depth guard tripped on roughly one load in three, and
+    when it tripped it took the whole page down.
 
-    It only started showing up once the aurora rewrite took the frame from 8ms
-    to 6ms and the load got quicker — which is the usual way a latent
-    render-loop surfaces, and the reason it is fixed here rather than in
-    whichever caller happens to memoise its callback today.
+    Reading the same value on an animation frame instead means nothing in the
+    render tree is subscribed to the loading manager at all. The bar moves at
+    frame rate, which is as often as it can be seen to move anyway, and the poll
+    stops itself once the load is done.
   */
   const cb = useRef(onProgress)
   cb.current = onProgress
+
   useEffect(() => {
-    cb.current?.(progress / 100)
-  }, [progress])
+    let raf = 0
+    let last = -1
+
+    const tick = () => {
+      const p = useProgress.getState().progress
+      if (p !== last) {
+        last = p
+        cb.current?.(p / 100)
+      }
+      // Done is done. Left running this would poll for the life of the page to
+      // report a number that cannot change again.
+      if (p >= 100) return
+      raf = requestAnimationFrame(tick)
+    }
+
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   return null
 }
 
@@ -2831,6 +2973,7 @@ export default function CampHero({
   entered,
   onEnter,
   onNavigate,
+  onZoom,
   onBookOpenRequest,
   onExit,
   onProgress,
@@ -2839,7 +2982,8 @@ export default function CampHero({
   onFocus?: (i: TentIndex) => void
   entered: number | null
   onEnter: (i: TentIndex) => void
-  onNavigate: (to: string) => void
+  onNavigate: (to: string, from?: PageScreenRect) => void
+  onZoom?: (src: string, from: PageScreenRect) => void
   /** Fired the moment the reader clicks the closed journal open. */
   onBookOpenRequest?: () => void
   /** Fired when a journal is closed from its own last/first page rather than
@@ -2983,6 +3127,7 @@ export default function CampHero({
           entered={entered}
           onEnter={onEnter}
           onNavigate={onNavigate}
+          onZoom={onZoom}
           onBookOpenRequest={onBookOpenRequest}
           onExit={onExit}
         />
