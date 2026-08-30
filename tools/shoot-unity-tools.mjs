@@ -40,11 +40,11 @@ const FRAME = { left: 3, top: 33, width: 7, height: 37 }
  * frames the part of each tool worth recognising, so it lands near full size.
  */
 const TOOLS = [
-  { n: 1, menu: '1 Batch Forge', slug: 'batch-forge', w: 700, h: 1180,
+  { n: 1, menu: '1 Mesh Atlas Builder', slug: 'mesh-atlas-builder', w: 700, h: 1180,
     book: { left: 0, top: 600, width: 700, height: 380 } },
-  { n: 2, menu: '2 Palette Forge', slug: 'palette-forge', w: 760, h: 1080,
+  { n: 2, menu: '2 GPU Instanced Painter', slug: 'gpu-instanced-painter', w: 760, h: 1080,
     book: { left: 0, top: 120, width: 760, height: 400 } },
-  { n: 3, menu: '3 Icon Forge', slug: 'icon-forge', w: 1060, h: 800,
+  { n: 3, menu: '3 Icon Generator', slug: 'icon-generator', w: 1060, h: 800,
     book: { left: 0, top: 300, width: 745, height: 400 } },
   { n: 4, menu: '4 Shadow Baker', slug: 'shadow-baker', w: 720, h: 1030,
     book: { left: 0, top: 400, width: 720, height: 390 } },

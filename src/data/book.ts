@@ -109,7 +109,7 @@ interface ToolExtra {
 }
 
 const TOOL_EXTRAS: Record<string, ToolExtra> = {
-  'batch-forge': {
+  'mesh-atlas-builder': {
     how: 'A market stall is twelve renderers and eight materials, and a street holds a hundred and eighty stalls. Packing the textures into one atlas and remapping the UVs collapses the prop to one material, and one material is what lets the copies batch. The occupancy readout is there because a badly packed atlas trades draw calls for texture memory.',
     shotCaption: 'A pass over a twelve-part market stall: the packing preview and the cost on either side.',
     deltas: [
@@ -119,7 +119,7 @@ const TOOL_EXTRAS: Record<string, ToolExtra> = {
     ],
     note: 'One draw per instance instead of twelve, and one SetPass for the whole street.',
   },
-  'palette-forge': {
+  'gpu-instanced-painter': {
     how: 'A table has an oak top, painted legs, an apron, and brass hardware. Recoloring it per instance the usual way needs a material per colorway, and that is exactly what breaks instancing. Tagging each part with a vertex color channel moves the variation into a property block instead, which instancing does not care about.',
     shotCaption: 'Channel assignment, the four swatches, and a strip of instances off one mesh and one material.',
     deltas: [
@@ -129,7 +129,7 @@ const TOOL_EXTRAS: Record<string, ToolExtra> = {
     ],
     note: 'The colourways cost nothing extra once the colours live in a property block.',
   },
-  'icon-forge': {
+  'icon-generator': {
     how: 'The preview is a real render. The meshes are drawn explicitly rather than handed over as a GameObject, which is what makes it work for props whose meshes hang off children, so what the window shows is what lands on disk. A queue on the side renders a whole car roster in one pass.',
     shotCaption: 'A shipped car framed for its shop icon, three preview lights, outline dilate on.',
     deltas: [

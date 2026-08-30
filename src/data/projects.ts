@@ -469,8 +469,8 @@ export const projects: Project[] = [
 
   /* ------------------------------------------------------------------ TOOLS */
   {
-    slug: 'batch-forge',
-    title: 'Batch Forge',
+    slug: 'mesh-atlas-builder',
+    title: 'Mesh Atlas Builder',
     subtitle: 'Mesh and material combiner with a generated texture atlas',
     type: 'tool',
     year: 2025,
@@ -487,7 +487,7 @@ export const projects: Project[] = [
       'Collapses a prop hierarchy into one mesh and one atlased material. A street of market stalls goes from 2,160 draw calls to 180.',
     overview: [
       'A market stall is twelve renderers and eight materials, and a street holds a hundred and eighty stalls. Drawn as authored that is thousands of draw calls for scenery nobody looks at directly.',
-      'Batch Forge walks the hierarchy, packs every source albedo into one atlas, rewrites each mesh\'s UVs into its cell, and writes a single combined mesh and material.',
+      'Mesh Atlas Builder walks the hierarchy, packs every source albedo into one atlas, rewrites each mesh\'s UVs into its cell, and writes a single combined mesh and material.',
     ],
     contributions: [
       'Editor window that searches the scene and lists every renderer with its material and texture budget.',
@@ -506,17 +506,17 @@ export const projects: Project[] = [
       { value: '8 → 1', label: 'SetPass calls' },
       { value: '−51%', label: 'CPU frame time' },
     ],
-    thumb: '/media/tools/batch-forge.png',
+    thumb: '/media/tools/mesh-atlas-builder.png',
     gallery: [
       {
         caption: 'The window after a pass over a twelve-part market stall: packing preview, occupancy, and the cost on either side.',
-        src: '/media/tools/batch-forge.png',
+        src: '/media/tools/mesh-atlas-builder.png',
       },
     ],
   },
   {
-    slug: 'palette-forge',
-    title: 'Palette Forge',
+    slug: 'gpu-instanced-painter',
+    title: 'GPU Instanced Painter',
     subtitle: 'Vertex color combiner with a GPU instanced recoloring shader',
     type: 'tool',
     year: 2025,
@@ -533,7 +533,7 @@ export const projects: Project[] = [
       'Four paintable zones in one mesh and one material, so every instance can be a different colourway and still draw in one batch.',
     overview: [
       'A table has an oak top, painted legs, an apron and brass hardware. Recolouring it per instance the usual way needs a material per colourway, which is exactly what breaks instancing.',
-      'Palette Forge bakes the parts into one mesh, tags each into a vertex-colour channel, and drives four tint colours from a MaterialPropertyBlock. The variation moves out of the material and into somewhere instancing does not care about.',
+      'GPU Instanced Painter bakes the parts into one mesh, tags each into a vertex-colour channel, and drives four tint colours from a MaterialPropertyBlock. The variation moves out of the material and into somewhere instancing does not care about.',
     ],
     contributions: [
       'Editor window for assigning each child part of a prop to an R, G, B, or A vertex color channel.',
@@ -552,17 +552,17 @@ export const projects: Project[] = [
       { value: '32 → 1', label: 'Unique materials' },
       { value: '5 → 1', label: 'Mesh assets' },
     ],
-    thumb: '/media/tools/palette-forge.png',
+    thumb: '/media/tools/gpu-instanced-painter.png',
     gallery: [
       {
         caption: 'Channel assignment, the four colourway swatches, and a strip of instances that all come off one mesh and one material.',
-        src: '/media/tools/palette-forge.png',
+        src: '/media/tools/gpu-instanced-painter.png',
       },
     ],
   },
   {
-    slug: 'icon-forge',
-    title: 'Icon Forge',
+    slug: 'icon-generator',
+    title: 'Icon Generator',
     subtitle: '3D asset to UI sprite, without a render scene',
     type: 'tool',
     year: 2025,
@@ -579,7 +579,7 @@ export const projects: Project[] = [
       'Frame a 3D asset, light it, outline it, and write the icon sprite, with no render scene to set up and no DCC round trip.',
     overview: [
       'Every shop, garage and inventory screen needs a flat icon of a thing that exists in 3D. The usual answer is a render scene somebody maintains, or a trip through a DCC package and back.',
-      'Icon Forge renders the asset live in an off-screen preview you can orbit, lights it with up to three placeable lights, dilates a coloured outline around the silhouette, and writes the supersampled sprite with its alpha.',
+      'Icon Generator renders the asset live in an off-screen preview you can orbit, lights it with up to three placeable lights, dilates a coloured outline around the silhouette, and writes the supersampled sprite with its alpha.',
     ],
     contributions: [
       'Live preview with orbit, pan, and zoom, and an auto frame that fits the subject with space around it.',
@@ -597,11 +597,11 @@ export const projects: Project[] = [
       { value: '14 min → 36 s', label: 'Per icon' },
       { value: '3 → 1', label: 'Apps in the loop' },
     ],
-    thumb: '/media/tools/icon-forge.png',
+    thumb: '/media/tools/icon-generator.png',
     gallery: [
       {
         caption: 'A shipped car framed for its shop icon: three preview lights, outline dilate on, checkerboard showing the cut-out.',
-        src: '/media/tools/icon-forge.png',
+        src: '/media/tools/icon-generator.png',
       },
     ],
   },

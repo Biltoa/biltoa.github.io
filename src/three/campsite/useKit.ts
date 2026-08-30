@@ -311,8 +311,14 @@ export function useKit() {
           // And the moonlit tips. Warm-dark rather than the old blue-green:
           // the far field in the reference is near-black with a red cast, not
           // a cool one, because nothing cold reaches the floor of a clearing.
-          tipTint: new THREE.Color('#3f4a2c'),
-          coolGain: 0.60,
+          // VISUAL-13.9 (2026-08-30): '#3f4a2c' -> '#26382f', coolGain 0.60 ->
+          // 0.86. The tips were a warm olive at every radius, so a blade at the
+          // edge of the frame was the same colour as a blade at the coals and
+          // the fire stopped reading as the thing lighting the field. The far
+          // end of the ramp is a dark blue-green now; the warm terms below are
+          // unchanged, so the pool round the fire is the only warm ground.
+          tipTint: new THREE.Color('#26382f'),
+          coolGain: 0.86,
           // The fire and six torches are the only warm light in the clearing
           // and the field is what they are standing in; a camp whose grass does
           // not change colour toward the coals reads as a green carpet with
@@ -371,9 +377,14 @@ export function useKit() {
           // so it's the one tree surface with a full PBR response to the
           // much brighter key/rim baked in this session, and the one the
           // user flagged as reading too bright at the pack's own colour.
-          bark.color = new THREE.Color('#610000')
-          bark.emissive = new THREE.Color('#2a1f1a')
-          bark.emissiveIntensity = 0.59
+          // VISUAL-13.8 (2026-08-30): '#610000' -> '#2c2118', emissiveIntensity
+          // 0.59 -> 0.34. A saturated dark red on every trunk in the wood put a
+          // third hue family into a frame that already has fire and aurora in
+          // it, and it is most of why the near stand read as a different art
+          // style from the tents. Bark is brown, and it is dark.
+          bark.color = new THREE.Color('#2c2118')
+          bark.emissive = new THREE.Color('#1a1712')
+          bark.emissiveIntensity = 0.34
           BARK_MATERIALS.push(bark)
           return p
         }
@@ -475,7 +486,10 @@ export function useKit() {
             low: AURORA_BOUNCE_LOW,
             mid: AURORA_BOUNCE_MID,
             high: AURORA_BOUNCE_HIGH,
-            gain: 0.1,
+            // VISUAL-13.8 (2026-08-30): gain 0.1 -> 0.065. The curtain still
+            // catches the crowns; it no longer washes the whole stand toward
+            // the sky's own colour, which was flattening the depth ramp above.
+            gain: 0.065,
             base: 0.6,
             span: 9,
           },

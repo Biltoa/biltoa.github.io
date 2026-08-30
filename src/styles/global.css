@@ -757,9 +757,14 @@ select {
   font-size: 30px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #fff6e4;
+  /* VISUAL-13.10b (2026-08-30): #fff6e4 -> a dimmer warm off-white, and the
+     glow halved. These labels were the brightest thing in the frame — brighter
+     than the fire — which is exactly backwards for a scene whose subject is a
+     fire in a dark wood. They still read; they no longer compete. Hover puts
+     the full value back (see .tentsign.is-hot). */
+  color: rgba(255, 246, 228, 0.72);
   white-space: nowrap;
-  text-shadow: 0 2px 10px rgba(30, 8, 20, 0.9), 0 0 22px color-mix(in srgb, var(--tent-color) 70%, transparent);
+  text-shadow: 0 2px 10px rgba(30, 8, 20, 0.9), 0 0 14px color-mix(in srgb, var(--tent-color) 45%, transparent);
   transition: color 0.25s, text-shadow 0.25s, letter-spacing 0.25s;
 }
 

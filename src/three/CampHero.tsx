@@ -62,11 +62,21 @@ const NIGHT = {
   /** Key: the moon. Aligned with the disc painted in the sky shader.
       LIGHTING-REWORK (2026-08-17): baked from the ?debug panel at the
       user's request — intensity 1.55->4, color '#93b4ee'->'#ffffff'. */
-  moon: { intensity: 4, color: '#ffffff' },
+  // VISUAL-13.1 (2026-08-30): 4 -> 2.6, '#ffffff' -> '#c3d6ff'. A white moon at
+  // four is a second key light, not a night sky, and it is half of why every
+  // surface in the frame had the same value regardless of how far it was from
+  // the fire. Cool and dimmer: the moon separates shapes, the fire lights them.
+  moon: { intensity: 2.6, color: '#c3d6ff' },
   /** Cool rim from behind and above, which is what separates tent from tree.
       LIGHTING-REWORK (2026-08-17): baked from ?debug — intensity 0.62->2,
       color '#5aa9ff'->'#ffffff'. */
-  rim: { intensity: 2, color: '#ffffff' },
+  // VISUAL-13.1e (2026-08-30): 2 -> 1.2, '#ffffff' -> '#5fd8c4'. This is the
+  // aurora's contribution to the world, done as a dim cool directional from
+  // over the camp's shoulder rather than as an environment map — it is one
+  // light against a convolution and a cube target, and on this scene the rim is
+  // the only direction the curtain would have reached anyway. Teal, so tree
+  // canopies, tent peaks and the tops of the grass take a green-cyan edge.
+  rim: { intensity: 1.2, color: '#5fd8c4' },
   /**
    * Sky and ground bounce. Navy above, near-black below: a hemisphere light
    * with a lifted ground colour is exactly the grey-shadow failure mode.
@@ -91,7 +101,15 @@ const NIGHT = {
   // LIGHTING-REWORK (2026-08-17): baked from ?debug — sky '#2a3050'->'#000000',
   // ground '#070a14'->'#ffffff' (was '#d1d1d1' in an earlier bake this same
   // session), intensity 0.23->1.
-  hemisphere: { sky: '#000000', ground: '#ffffff', intensity: 1 },
+  // VISUAL-13.1b (2026-08-30): sky '#000000' -> '#2f93a8', ground '#ffffff' ->
+  // '#050a14', intensity 1 -> 0.34.
+  //
+  // The previous values were a debug-panel bake that had ended up inverted: a
+  // *white* ground bounce at full intensity, reaching every surface from below
+  // with no falloff and no shadow. That is a flat warm-grey wash over the whole
+  // frame, and it is the single reason the camp read as evenly lit rather than
+  // as a fire in a dark wood. Cyan-blue above, near-black blue below, and low.
+  hemisphere: { sky: '#2f93a8', ground: '#050a14', intensity: 0.34 },
   /** The last resort against crushed black.
       LIGHTING-REWORK (2026-08-17): baked from ?debug, second pass — turned
       off (intensity 1->0) once the hemisphere alone was carrying enough. */
@@ -103,9 +121,16 @@ const NIGHT = {
    * under everything past 26 metres — which is the entire treeline. At
    * `#132a58` that floor was brighter than the reference's *trees*.
    */
-  fog: { color: '#141426', density: 0.0068 },
+  // VISUAL-13.1f (2026-08-30): '#141426' -> '#12333d', density 0.0068 ->
+  // 0.0084. Tinted to the aurora's teal and thickened, so the back rows of the
+  // wood sink toward the curtain's own colour instead of holding the same
+  // contrast and saturation as the trees at the edge of the clearing.
+  fog: { color: '#12333d', density: 0.0084 },
   /** ACES exposure. */
-  exposure: 1.02,
+  // VISUAL-13.1d (2026-08-30): 1.02 -> 0.93. ACES and SRGB output were already
+  // correct; the exposure was not, and a scene that is meant to be a night with
+  // one fire in it should be sitting under the shoulder, not on it.
+  exposure: 0.93,
   /**
    * Radii the grass shader uses for its warm falloff. See wind.ts.
    *
@@ -217,7 +242,6 @@ const TENT = {
 } as const
 
 const BACK = (TENT.rawDepth * TENT.scale) / 2
-const HALF_W = (TENT.rawWidth * TENT.scale) / 2
 const TOP = TENT.rawHeight * TENT.scale
 
 /**
@@ -225,10 +249,26 @@ const TOP = TENT.rawHeight * TENT.scale
  * turned inward so the three sit on an arc rather than in a shop-window row.
  */
 const CAMP_X = 0
+/*
+  VISUAL-13.10a (2026-08-30): the two outer tents were mirror images at the same
+  depth and the same angle — was z -5.4 / yaw ±0.46 for both.
+
+  Three identical meshes recoloured, evenly spaced, at one depth, on a flat
+  horizon is a menu. Pitching them at slightly different depths and angles is
+  what makes it a place somebody set up. The variation is deliberately small:
+  the middle tent stays on x = 0 because the responsive framing is built around
+  it being centred, and all three still sit comfortably inside the lobby frame
+  at every aspect the site supports.
+
+  Scale is *not* varied. The journal, the bench and the reading camera all live
+  in the tent's own frame, so scaling a tent scales its book and the pose that
+  reads it — three differently sized spreads for the sake of a few centimetres
+  of silhouette is the wrong trade. See DECISIONS in VISUAL_CHANGES.md.
+*/
 const TENTS = [
-  { x: CAMP_X - 8.2, z: -5.4, yaw: 0.46 },
-  { x: CAMP_X, z: -7.8, yaw: 0 },
-  { x: CAMP_X + 8.2, z: -5.4, yaw: -0.46 },
+  { x: CAMP_X - 8.2, z: -5.05, yaw: 0.53 },
+  { x: CAMP_X, z: -8.15, yaw: 0.04 },
+  { x: CAMP_X + 8.2, z: -5.85, yaw: -0.4 },
 ]
 const TENT_TINT = ['#e8492c', '#3f6ef5', '#f5b722']
 /** Saturated neon versions for the signage — a tent tint is fabric, not light. */
@@ -391,16 +431,36 @@ function tentDoorSpill(index: number) {
 }
 
 /** World positions of a tent's two door torches. */
-function tentTorches(index: number) {
+/**
+ * World positions of a tent's two hanging lanterns.
+ *
+ * VISUAL-13.5 (2026-08-30): was `tentTorches`, at `HALF_W * 0.72` and
+ * `BACK + 0.35` — two free-standing poles planted in the grass a metre outside
+ * each tent. Lanterns hang on the tent's own front frame instead: closer in,
+ * off the ground, and belonging to the tent rather than to the clearing. That
+ * is the point of the change. A torch on the ground lights a patch of field; a
+ * lantern on the frame gives the tent its own pool of warm light, which is what
+ * claims it as somewhere to go and reinforces the click-to-enter affordance.
+ */
+function tentLanterns(index: number) {
   const t = TENTS[index]
   const fx = Math.sin(t.yaw)
   const fz = Math.cos(t.yaw)
-  const depth = BACK + 0.35
+  const depth = BACK + LANTERN_LOCAL.z
   return [-1, 1].map((s) => {
-    const side = s * HALF_W * 0.72
+    const side = s * LANTERN_LOCAL.x
     return { x: t.x + fx * depth + fz * side, z: t.z + fz * depth - fx * side }
   })
 }
+
+/**
+ * Where a lantern hangs, in the tent's own frame.
+ *
+ * `x` is out to the front frame poles either side of the doorway, `y` is
+ * roughly shoulder height on them, `z` is a hand's width proud of the door
+ * plane so the lamp hangs in front of the fabric rather than inside it.
+ */
+const LANTERN_LOCAL = { x: 1.42, y: 1.52, z: 0.06 } as const
 
 /** Hermite ramp, clamped. */
 function smoothstep(a: number, b: number, x: number) {
@@ -497,6 +557,44 @@ const contactShadow = /* @__PURE__ */ (() =>
  * flat grey pad in the middle of the frame.
  */
 const WALK_R = 3.85
+
+/**
+ * Half-width of a trodden path, in metres.
+ *
+ * Wide enough to read from the lobby camera, narrow enough that it does not eat
+ * the clearing. See VISUAL-13.9.
+ */
+const PATH_HALF = 0.85
+
+/**
+ * Whether a point falls on one of the three paths from the fire to a doorway.
+ *
+ * Distance from the point to each segment, done in the flat plane. The paths
+ * run from the edge of the paved ring out to a metre short of each threshold,
+ * so neither end is a hard stop against something else's boundary.
+ */
+function onTentPath(x: number, z: number) {
+  for (let i = 0; i < TENTS.length; i++) {
+    const t = TENTS[i]
+    const fx = Math.sin(t.yaw)
+    const fz = Math.cos(t.yaw)
+    const depth = BACK + 0.5
+    const ax = FIRE_POS[0]
+    const az = FIRE_POS[2]
+    const bx = t.x + fx * depth
+    const bz = t.z + fz * depth
+    const dx = bx - ax
+    const dz = bz - az
+    const len2 = dx * dx + dz * dz
+    const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2))
+    const px = ax + dx * u
+    const pz = az + dz * u
+    // Tapers toward the doorway, which is what a path worn by feet does.
+    const half = PATH_HALF * (1.15 - 0.35 * u)
+    if (Math.hypot(x - px, z - pz) < half) return true
+  }
+  return false
+}
 
 /**
  * The clearing's alpha, with the rim chewed away.
@@ -713,7 +811,17 @@ function Ground() {
  * treeline was the brightest, reddest thing in frame and the camp sat in the
  * middle of a bonfire-coloured wood.
  */
-const TREE_TINTS = ['#3d5225', '#4a5c2a', '#2f4a22', '#3a4e2a', '#55501f']
+/*
+  VISUAL-13.8 (2026-08-30): five tints -> three, and all of them darker and
+  closer together.
+
+  Was ['#3d5225', '#4a5c2a', '#2f4a22', '#3a4e2a', '#55501f']. Five species
+  colours across seventy trees, each one picked at random per instance, is what
+  made the wood read as noise rather than as a stand — the eye reads a canopy by
+  its silhouette, and a silhouette needs the values inside it to agree. Three
+  values, half a stop apart, in a darker green.
+*/
+const TREE_TINTS = ['#2a3a1d', '#32421f', '#243418']
 
 /**
  * What the wood is lit *by*, applied on top of the species colour.
@@ -746,13 +854,33 @@ const TREE_MOONLIT = /* @__PURE__ */ new THREE.Color('#25456f')
  * in wind.ts does the rest, on the crowns, and moves.
  */
 const TREE_AURORA_TEAL = /* @__PURE__ */ new THREE.Color('#1c6f78')
-const TREE_AURORA_VIOLET = /* @__PURE__ */ new THREE.Color('#4a4088')
+// VISUAL-13.8 (2026-08-30): '#4a4088' -> '#2a3a6a'. The violet quarter was the
+// loudest colour in the wood and the one furthest from anything else in frame.
+// Pulled to a blue that still differs from the teal without introducing a third
+// hue family.
+const TREE_AURORA_VIOLET = /* @__PURE__ */ new THREE.Color('#2a3a6a')
 
 function Scatter() {
   const kit = useKit()
 
   const grassParts = [kit.grassParts('GrassA'), kit.grassParts('GrassB')]
   const stoneParts = kit.parts('Stone')
+  // VISUAL-13.9 (2026-08-30): both flower meshes, sown together as one set.
+  // VISUAL-13.9 (2026-08-30): tinted down hard. The pack authors these for
+  // daylight with a near-white head and an emissive lift for Unity's HDR
+  // pipeline, and dropped into this frame untouched they came out as a band of
+  // blown white specks — brighter than the tents, through the bloom, across the
+  // middle of the clearing. A flower at night is a pale shape, not a light.
+  const flowerParts = useMemo(
+    () =>
+      tintParts([...kit.parts('Flowers_0'), ...kit.parts('Flowers_1')], '#4e5340', {
+        roughness: 1,
+        metalness: 0,
+        emissive: new THREE.Color('#000000'),
+        emissiveIntensity: 0,
+      }),
+    [kit]
+  )
   const benchParts = kit.parts('Bench')
 
   const scatter = useMemo(() => {
@@ -805,7 +933,18 @@ function Scatter() {
       // far enough that the wood was a black mass against a barely-lighter sky
       // and the frame had no depth behind the camp at all. Near unity for the
       // near trees, easing off with distance so the far band still recedes.
-      tint.multiplyScalar(1.32 - depth * 0.14)
+      /*
+        VISUAL-13.8 (2026-08-30): 1.32 - depth * 0.14 -> 1.04 - depth * 0.58.
+
+        The old curve was near-flat: a tree forty metres back came out at 93% of
+        the value of one at the edge of the clearing, so every rank had the same
+        contrast and the same saturation and the treeline read as one wall
+        standing alongside the campsite rather than behind it. The back of the
+        wood is now a little over a stop down on the front of it, which — with
+        the thicker teal fog above — is what puts the camp in front of the
+        forest instead of in it.
+      */
+      tint.multiplyScalar(1.04 - depth * 0.58)
       group.colors.push(tint)
       treeGroups.set(key, group)
     }
@@ -876,11 +1015,21 @@ function Scatter() {
         // Clear of each tent's footprint, but only just — the old 3.6 left a
         // bare apron in front of every doorway.
         if (TENTS.some((t) => Math.hypot(x - t.x, z - t.z) < 2.85)) continue
+        // VISUAL-13.9 (2026-08-30): a corridor of trodden ground from the fire
+        // to each doorway. The camp is somewhere people walk between three
+        // tents and a fire, and an unbroken field right up to every threshold
+        // is the tell that nobody does. Blades inside the corridor are simply
+        // not sown; the dirt underneath is what shows. See `PathDecal`.
+        if (onTentPath(x, z)) continue
         const far = clamp01((dFire - 6) / 22)
+        // VISUAL-13.9 (2026-08-30): 0.62 + r * 0.45 + far * 0.9 -> 0.5 + r *
+        // 0.38 + far * 0.62. A shorter field. The old height put the near band
+        // over the benches from the lobby camera and turned the bottom third of
+        // the frame into one flat olive mass with nothing in it.
         grassItems[i % 3 === 0 ? 1 : 0].push({
           pos: [x, 0, z],
           rotY: r() * Math.PI * 2,
-          scale: scale * (0.62 + r() * 0.45 + far * 0.9),
+          scale: scale * (0.5 + r() * 0.38 + far * 0.62),
         })
       }
     }
@@ -902,6 +1051,31 @@ function Scatter() {
     // density as ground thirty metres away, which at this camera height is
     // nowhere near enough to close over.
     sowGrass(1650, 4.2, 11.5, 1.15, 1.16)
+
+    /*
+      Flowers, in loose clumps rather than an even sprinkle.
+
+      The kit ships two flower meshes and neither was ever sown. A field broken
+      up by a few dozen pale heads reads as ground; the same field without them
+      reads as a texture. Kept off the paths and out of the deep field, where
+      they would be sub-pixel and cost draw calls for nothing.
+    */
+    const flowers: { pos: [number, number, number]; rotY: number; scale: number }[] = []
+    for (let c = 0; c < 9; c++) {
+      const a = r() * Math.PI * 2
+      const rad = 5.5 + Math.pow(r(), 0.8) * 12
+      const cx = FIRE_POS[0] + Math.cos(a) * rad
+      const cz = FIRE_POS[2] + Math.sin(a) * rad
+      if (cz > 11) continue
+      if (TENTS.some((t) => Math.hypot(cx - t.x, cz - t.z) < 3.1)) continue
+      for (let i = 0; i < 5 + ((r() * 5) | 0); i++) {
+        const x = cx + (r() - 0.5) * 2.4
+        const z = cz + (r() - 0.5) * 2.4
+        if (onTentPath(x, z)) continue
+        if (Math.hypot(x - FIRE_POS[0], z - FIRE_POS[2]) < WALK_R) continue
+        flowers.push({ pos: [x, 0, z], rotY: r() * Math.PI * 2, scale: 0.5 + r() * 0.5 })
+      }
+    }
 
     const stones = buildMatrices(
       Array.from({ length: 26 }, () => {
@@ -945,6 +1119,7 @@ function Scatter() {
         colors: g.colors,
       })),
       grass: grassItems.map((clump) => buildMatrices(clump)),
+      flowers: buildMatrices(flowers),
       stones,
       benches,
       trunkShadows: buildMatrices(trunkShadows),
@@ -994,6 +1169,10 @@ function Scatter() {
         <InstancedParts key={`grass${i}`} parts={parts} matrices={scatter.grass[i]} />
       ))}
       <InstancedParts parts={stoneParts} matrices={scatter.stones} castShadow receiveShadow />
+      {/* VISUAL-13.9 (2026-08-30): the kit's flower meshes, sown in clumps.
+          Not shadow casters — twenty draw-call-free instances of a two-card
+          mesh are not worth a depth pass. */}
+      <InstancedParts parts={flowerParts} matrices={scatter.flowers} />
       <InstancedParts parts={benchParts} matrices={scatter.benches} castShadow receiveShadow />
 
       {/* Contact patches: one per trunk, one under each bench. */}
@@ -1077,6 +1256,32 @@ function getDoorwaySpillTex() {
  * not the ground outside), so this is the same fake-pool trick as the
  * torches rather than a change to that light's reach.
  */
+/**
+ * The warm patch a hanging lantern lays on the grass under it.
+ *
+ * A baked gradient quad rather than a second light: six lanterns already carry
+ * a point source each, and what this is standing in for — the bounce off the
+ * ground directly under a lamp — has no shape a point light would give it
+ * anyway. See VISUAL-13.5.
+ */
+function LanternPool({ position }: { position: [number, number, number] }) {
+  return (
+    <mesh rotation-x={-Math.PI / 2} position={position}>
+      <planeGeometry args={[2.2, 2.2]} />
+      <meshBasicMaterial
+        map={getDoorwaySpillTex()}
+        color="#ffb765"
+        transparent
+        opacity={0.16}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+        fog={false}
+      />
+    </mesh>
+  )
+}
+
 function DoorwaySpill({ position, color, opacity = 0.34 }: { position: [number, number, number]; color: THREE.Color; opacity?: number }) {
   return (
     <mesh rotation-x={-Math.PI / 2} position={position}>
@@ -1132,7 +1337,7 @@ function Prop({
  * tuned to match the grass it lit the tent front like a stage. Three lights is
  * about 2ms of a 32ms frame — the wrong 2ms to spend.
  */
-function Torch({
+function Lantern({
   position,
   seed,
   lit = true,
@@ -1144,10 +1349,36 @@ function Torch({
   const kit = useKit()
   return (
     <group position={position}>
-      {kit.parts('Torch').map((p, i) => (
-        <mesh key={i} geometry={p.geometry} material={p.material} castShadow />
-      ))}
-      <TorchFlame position={[0, 1.66, 0]} seed={seed} lit={lit} />
+      {/* The strap it hangs by. A lamp floating off a pole is a lamp nobody
+          believes; two centimetres of cord is the whole fix. */}
+      <mesh position={[0, 0.15, 0]}>
+        <cylinderGeometry args={[0.012, 0.012, 0.3, 5]} />
+        <meshStandardMaterial color="#6b563a" roughness={0.9} metalness={0} />
+      </mesh>
+      <group scale={0.8}>
+        {kit.parts('Lamp').map((p, i) => (
+          <mesh key={i} geometry={p.geometry} material={p.material} castShadow />
+        ))}
+      </group>
+      {/*
+        The candle inside the glass.
+
+        `single`, and small: a lantern flame is read through glass from several
+        metres away, so the crossed pair the torches use is two flat flames in
+        an X and nothing else. `reach` is short — 4.2 rather than the torch's
+        8.5 — because the point of the change is a pool that stops at the tent
+        rather than a light that washes the clearing.
+      */}
+      <TorchFlame
+        position={[0, 0.2, 0]}
+        seed={seed}
+        scale={0.42}
+        strength={1}
+        light={9.5}
+        reach={4.6}
+        single
+        lit={lit}
+      />
     </group>
   )
 }
@@ -1492,6 +1723,29 @@ function Tent({
       side: THREE.DoubleSide,
       emissive: new THREE.Color('#000000'),
     })
+    /*
+      VISUAL-13.7 (2026-08-30): the tent's second material slot is not fabric
+      and must not take the fabric's colour.
+
+      `Tent_1` carries the frame, the guy ropes and the stakes, and `tintParts`
+      was painting all of it the tent's own tint — so each tent's ropes were
+      three-metre lines of saturated red, blue or yellow drawn across the frame
+      at one pixel wide. That is why they read as an interface overlay rather
+      than as cord. Rope brown, matte, and it now takes the lanterns' and the
+      fire's light like the rest of the camp.
+
+      Thickness and sag are not fixed here: the ropes are baked into the same
+      primitive as the frame in campsite-kit.glb, so re-running them as tubes
+      along a sagging curve means re-authoring the model. See INCOMPLETE in
+      VISUAL_CHANGES.md.
+    */
+    for (const p of list) {
+      if (p.material.name === 'Tent_1') {
+        p.material.color = new THREE.Color('#8b6f47')
+        p.material.roughness = 1
+        p.material.metalness = 0
+      }
+    }
     return list
   }, [kit, index])
 
@@ -1815,24 +2069,29 @@ function Tent({
         />
       </group>
 
-      {/* Torches flanking the entrance. */}
-      <Torch position={[-HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3} lit={here} />
-      <Torch position={[HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3 + 1.7} lit={here} />
+      {/* Lanterns hung on the front frame, one either side of the doorway.
+          See VISUAL-13.5 and `tentLanterns`. */}
+      <Lantern
+        position={[-LANTERN_LOCAL.x, LANTERN_LOCAL.y, BACK + LANTERN_LOCAL.z]}
+        seed={index * 2.3}
+        lit={here}
+      />
+      <Lantern
+        position={[LANTERN_LOCAL.x, LANTERN_LOCAL.y, BACK + LANTERN_LOCAL.z]}
+        seed={index * 2.3 + 1.7}
+        lit={here}
+      />
 
       {/* What plants the tent on the grass. The moon's shadow map covers the
           whole camp at three centimetres a texel, which at the foot of a wall
           is not enough to draw the dark line where canvas meets ground. */}
       <ContactShadow position={[0, 0.02, 0]} size={[3.7, 3.4]} opacity={0.26} />
-      <ContactShadow
-        position={[-HALF_W * 0.72, 0.02, BACK + 0.35]}
-        size={[1.1, 1.1]}
-        opacity={0.3}
-      />
-      <ContactShadow
-        position={[HALF_W * 0.72, 0.02, BACK + 0.35]}
-        size={[1.1, 1.1]}
-        opacity={0.3}
-      />
+      {/* VISUAL-13.5 (2026-08-30): the two 1.1m contact patches that sat under
+          the free-standing torch poles are gone with the poles. What replaces
+          them is a wider, fainter warm pool under each lantern — a hanging lamp
+          does not stand on the grass, it pours onto it. */}
+      <LanternPool position={[-LANTERN_LOCAL.x, 0.03, BACK + LANTERN_LOCAL.z]} />
+      <LanternPool position={[LANTERN_LOCAL.x, 0.03, BACK + LANTERN_LOCAL.z]} />
     </group>
   )
 }
@@ -1859,7 +2118,11 @@ function TentSign({
     <Html
       center
       distanceFactor={13}
-      position={[sign.x, TOP + 1.15, sign.z]}
+      // VISUAL-13.10b (2026-08-30): TOP + 1.15 -> TOP + 0.42. A metre and a
+      // half of empty sky between a label and the thing it labels is enough
+      // that the eye stops associating them; the reference frame has them
+      // sitting just off the peak.
+      position={[sign.x, TOP + 0.42, sign.z]}
       style={{ pointerEvents: 'auto', userSelect: 'none' }}
       zIndexRange={[8, 0]}
     >
@@ -2281,7 +2544,7 @@ function Scene({
         power: NIGHT.grassWarm.firePower,
       },
       ...[0, 1, 2].flatMap((i) =>
-        tentTorches(i).map((p) => ({
+        tentLanterns(i).map((p) => ({
           ...p,
           radius: NIGHT.grassWarm.torchRadius,
           power: NIGHT.grassWarm.torchPower,

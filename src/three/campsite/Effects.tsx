@@ -1246,9 +1246,21 @@ export function Fireflies({
     () => ({
       uTime: { value: 0 },
       uPixelRatio: { value: 1 },
-      uCore: { value: new THREE.Color('#fffdf2') },
-      uBody: { value: new THREE.Color('#ffc04a') },
-      uHalo: { value: new THREE.Color('#ff8a1e') },
+      /*
+        VISUAL-13.3 (2026-08-30): '#fffdf2' / '#ffc04a' / '#ff8a1e' ->
+        '#eafff4' / '#8ff0b4' / '#2fbf8a'.
+
+        These are the specks drifting across the whole frame, and painted in
+        fire colours they read as embers — embers thirty metres from the fire,
+        at uniform density, up over the tents and into the sky, where they
+        clashed with the blue tent. Embers belong to the flame and are handled
+        there. What this system is actually for is ambient movement, so it is
+        now what it looks like: cool green fireflies, which sit against the
+        aurora rather than competing with the fire.
+      */
+      uCore: { value: new THREE.Color('#eafff4') },
+      uBody: { value: new THREE.Color('#8ff0b4') },
+      uHalo: { value: new THREE.Color('#2fbf8a') },
     }),
     []
   )
@@ -1767,9 +1779,19 @@ export function Campfire({
     []
   )
 
-  const SMOKE = 6
+  /*
+    VISUAL-13.2 (2026-08-30): SMOKE 6 -> 9, colour '#9d8ab0' -> '#2b3450',
+    opacity 0.05 -> 0.085.
+
+    There was smoke, at a twentieth opacity in a pale mauve, starting a metre
+    and a half above the flame tips — which is to say there was no smoke, and
+    its absence is a large part of why the fire read as an icon pasted on the
+    grass rather than as something burning. Dark blue-grey rather than black,
+    low opacity, and it now starts at the tips.
+  */
+  const SMOKE = 9
   const smokeMats = useMemo(
-    () => Array.from({ length: SMOKE }, (_, i) => makeSmokeMaterial(i * 4.3, '#9d8ab0', 0.05)),
+    () => Array.from({ length: SMOKE }, (_, i) => makeSmokeMaterial(i * 4.3, '#2b3450', 0.085)),
     []
   )
 
@@ -1848,7 +1870,11 @@ export function Campfire({
 
     if (core.current) {
       const m = core.current.material as THREE.MeshBasicMaterial
-      m.opacity = 0.50 * flicker
+      // VISUAL-13.4 (2026-08-30): 0.50 -> 0.33. With a taller flame in front of
+      // it the core cleared the bloom threshold over a much larger area and the
+      // middle of the fire went to flat white, which is the one thing the core
+      // is not supposed to do to the silhouette.
+      m.opacity = 0.33 * flicker
       core.current.scale.setScalar(0.9 + flicker * 0.22)
       core.current.quaternion.copy(camera.quaternion)
     }
@@ -1858,16 +1884,32 @@ export function Campfire({
       const pos = sparkGeo.getAttribute('position') as THREE.BufferAttribute
       sparkSeeds.forEach((s, i) => {
         const life = (t * s.speed * 0.26 + s.offset) % 1
-        const y = 0.25 + life * 5.2
-        const spread = s.rad + life * 1.3
+        /*
+          VISUAL-13.3 (2026-08-30): rise 0.25 + life * 5.2 -> 0.25 + rise * 2.4,
+          spread rad + life * 1.3 -> rad + rise * 0.62.
+
+          An ember leaves the flame fast, loses to drag, and goes out. The old
+          curve was linear in life and ran to five and a half units, which put
+          embers level with the tent peaks at the same density they had at the
+          coals — that is the uniform scatter over the whole frame. `rise` is
+          life to the 0.62, so most of the travel happens in the first third and
+          the last two thirds are the ember decelerating; the whole column now
+          dies inside two and a half units of the fire.
+        */
+        const rise = Math.pow(life, 0.62)
+        const y = 0.25 + rise * 2.4
+        const spread = s.rad + rise * 0.62
         pos.setXYZ(
           i,
-          Math.cos(s.a + life * 2.4) * spread + s.drift * life,
+          Math.cos(s.a + life * 2.4) * spread + s.drift * rise * 0.5,
           y,
           Math.sin(s.a + life * 2.4) * spread
         )
       })
       pos.needsUpdate = true
+      // Fades out as the column tops out rather than being cut off at full
+      // brightness — a hard-edged loop is what makes a spark system read as a
+      // texture rather than as fire.
       ;(sp.material as THREE.PointsMaterial).opacity = 0.85 + Math.sin(t * 8) * 0.12
     }
 
@@ -1878,12 +1920,15 @@ export function Campfire({
         const life = (t * puff.speed + puff.offset) % 1
         // Starts above the flame tips: smoke drawn over the fire hides the one
         // thing the fire is for.
+        // VISUAL-13.2 (2026-08-30): base 1.55 -> 1.15, rise 7.5 -> 8.4, and the
+        // puff expands further over its life (0.5 + life * 2.2 -> 0.42 + life *
+        // 2.1). Smoke that does not grow as it climbs reads as a rising sprite.
         mesh.position.set(
           puff.drift * life * life * 3.2,
-          1.55 + life * 7.5,
+          1.15 + life * 8.4,
           puff.drift * life * 0.6
         )
-        mesh.scale.setScalar(puff.size * (0.5 + life * 2.2))
+        mesh.scale.setScalar(puff.size * (0.42 + life * 2.1))
         mesh.quaternion.copy(camera.quaternion)
         mesh.rotateZ(t * puff.spin + puff.offset * 6)
         const mat = mesh.material as THREE.ShaderMaterial
@@ -1960,7 +2005,18 @@ export function Campfire({
         />
       </mesh>
 
-      <group ref={flames}>
+      {/*
+        VISUAL-13.4 (2026-08-30): the flame group is scaled 1.24 across and 1.34
+        up, rather than the pit being shrunk.
+
+        The dirt circle is a nine-metre pool and a fire that only filled its
+        middle made the pit read as a flat decal painted on the grass. Widening
+        the base and — more importantly — making the flame taller is what fills
+        it: the reference frame's fire has a silhouette that reaches the height
+        of the benches behind it and throws a warm pool that goes all the way to
+        the edge of the burn.
+      */}
+      <group ref={flames} scale={[1.24, 1.34, 1.24]} position={[0, 0.05, 0]}>
         {flameMats.map((mat, i) => (
           <mesh
             key={i}

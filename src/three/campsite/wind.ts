@@ -121,7 +121,11 @@ export function setWarmLights(lights: WarmLight[]) {
  */
 export const AURORA_BOUNCE_LOW = /* @__PURE__ */ new THREE.Color('#17796e')
 export const AURORA_BOUNCE_MID = /* @__PURE__ */ new THREE.Color('#2a5c9e')
-export const AURORA_BOUNCE_HIGH = /* @__PURE__ */ new THREE.Color('#5f4a94')
+// VISUAL-13.8 (2026-08-30): '#5f4a94' -> '#3a4a86'. The magenta end of the
+// canopy bounce ramp was the violet cast over the top of the wood. Kept as a
+// distinct third stop so the ramp still runs somewhere, moved into the blue
+// family so the stand holds one colour story.
+export const AURORA_BOUNCE_HIGH = /* @__PURE__ */ new THREE.Color('#3a4a86')
 
 export interface AuroraBounce {
   /** Colour of the low end of the ramp — the teal the curtain sits on. */
