@@ -2948,8 +2948,18 @@ body.camp-zoom {
     margin-block: 6px;
   }
 
+  /*
+    The name moves out of the sky.
+
+    On a 390px-tall viewport the top-left corner belongs to the About tent's
+    label — the labels sit close to their tents now (VISUAL-13.10b), and on a
+    short frame "close to the tent" is the same band the name block was in. The
+    bottom-left is empty grass at every aspect the camp supports, so the name
+    goes there and the two stop fighting.
+  */
   .campui__name {
-    top: calc(var(--nav-h) + 4px);
+    top: auto;
+    bottom: 38px;
   }
 
   .campui__hint {
