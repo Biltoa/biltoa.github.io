@@ -2826,3 +2826,177 @@ body.camp-zoom {
   padding-top: 0;
 }
 
+
+/* -------------------------------------------------------------------------- */
+/*  Responsive: the camp is a landscape composition.                           */
+/*                                                                            */
+/*  1920x1080 and 2560x1440 are the poses everything else is judged against    */
+/*  and nothing here touches them: every rule below is gated on a viewport      */
+/*  that is much shorter, much smaller, or much larger than those.             */
+/* -------------------------------------------------------------------------- */
+
+/*
+  Rotate card. Only ever on screen for a touch device held upright, and only
+  over the camp — the written-out pages read perfectly well in portrait.
+*/
+.rotategate {
+  display: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  :root[data-surface='camp'] .rotategate {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+    background: radial-gradient(120% 90% at 50% 30%, #14213f 0%, #070a16 70%);
+    color: #f4ead9;
+  }
+  /* Nothing behind it should be running, listening, or scrollable. */
+  :root[data-surface='camp'] body,
+  :root[data-surface='camp'] .hero--camp {
+    overflow: hidden;
+  }
+}
+
+.rotategate__inner {
+  max-width: 22rem;
+}
+
+.rotategate__glyph {
+  width: 74px;
+  height: 74px;
+  margin: 0 auto 22px;
+  display: block;
+  fill: none;
+  stroke: #ffc477;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+  animation: rotategate-tip 2.6s var(--ease) infinite;
+}
+
+@keyframes rotategate-tip {
+  0%,
+  35% {
+    transform: rotate(0deg);
+  }
+  55%,
+  90% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotategate__glyph {
+    animation: none;
+    transform: rotate(-90deg);
+  }
+}
+
+.rotategate__title {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rotategate__body {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: rgba(244, 234, 217, 0.72);
+}
+
+/*
+  Short landscape — a phone on its side, and the small end of the tablets.
+
+  The constraint here is height, not width: at 390px tall the name block, the
+  nav bar and the corner informers between them own most of the frame, and the
+  name in particular ran straight across the left tent and its label. Keyed on
+  max-height so a 1280x720 desktop window, which is the same width and twice
+  the height, is left alone.
+*/
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --nav-h: 44px;
+    --gutter: clamp(12px, 2.2vw, 24px);
+  }
+
+  .campui__title {
+    font-size: clamp(1.15rem, 2.6vw, 1.7rem);
+  }
+
+  .campui__role {
+    font-size: 0.6rem;
+    letter-spacing: 0.16em;
+  }
+
+  .campui__rule {
+    margin-block: 6px;
+  }
+
+  .campui__name {
+    top: calc(var(--nav-h) + 4px);
+  }
+
+  .campui__hint {
+    bottom: 10px;
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    gap: 6px;
+  }
+
+  .campui__hintcursor {
+    width: 26px;
+    height: 26px;
+  }
+
+  .tentswitch,
+  .tentswitch.audioswitch {
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+  }
+
+  .tentswitch.audioswitch {
+    bottom: 10px;
+  }
+
+  /* The FPS readout is a dev affordance and it is the one thing up there wide
+     enough to cover a tent's label. */
+  .fpsmeter {
+    transform: scale(0.72);
+    transform-origin: 100% 0;
+  }
+}
+
+/*
+  Very large displays — 4K and up at device-pixel-ratio 1.
+
+  Every measurement in the interface is in CSS pixels, so on a 3840-wide
+  monitor the whole layer renders at half the apparent size it has on a 1920
+  one while the scene behind it is unchanged. Scaling the root font size puts
+  the two back in proportion. 2200px is above every 2K width and below every
+  4K one, so 2560x1440 is untouched.
+*/
+@media (min-width: 2200px) {
+  :root {
+    font-size: 20px;
+    --nav-h: 84px;
+    --gutter: clamp(32px, 3vw, 96px);
+  }
+}
+
+@media (min-width: 3200px) {
+  :root {
+    font-size: 24px;
+    --nav-h: 104px;
+  }
+}

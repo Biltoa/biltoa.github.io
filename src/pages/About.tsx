@@ -211,6 +211,35 @@ export default function About() {
         progress={stage === 'assets' ? assetProgress : stage === 'boot' ? 0.5 : 1}
       />
 
+      {/*
+        Turn the phone.
+
+        The camp is a landscape composition — three tents on an arc around a
+        fire, with the middle one centred — and there is no portrait crop of it
+        that keeps all three in frame and still leaves the journal readable.
+        Rather than ship a second composition nobody asked for, a touch device
+        held upright is asked to turn. Shown and hidden entirely in CSS, on
+        `(orientation: portrait) and (pointer: coarse)`, so it costs nothing on
+        a desktop and cannot get out of step with a resize the way a JS media
+        query listener can.
+
+        Screen Orientation's `lock()` is deliberately not called: outside
+        fullscreen it rejects on every browser that matters, and a rejected
+        promise on load is worse than a card that says what to do.
+      */}
+      <div className="rotategate" role="status">
+        <div className="rotategate__inner">
+          <svg className="rotategate__glyph" viewBox="0 0 64 64" aria-hidden="true">
+            <rect x="20" y="6" width="24" height="42" rx="4" />
+            <path d="M12 40a22 22 0 0 0 40 0" />
+          </svg>
+          <p className="rotategate__title">Turn your device</p>
+          <p className="rotategate__body">
+            The campsite is built for landscape. Rotate to sit down at the fire.
+          </p>
+        </div>
+      </div>
+
       {/* --------------------------------------------------------------- hero */}
       <section className="hero hero--camp" ref={heroRef} aria-label="Campsite">
         <div className="hero__stage">

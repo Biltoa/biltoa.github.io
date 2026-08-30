@@ -123,3 +123,87 @@ existing light, or a reuse of an already-existing additive-quad/shader-patch
 technique (torch/doorway pools, ground glow). Total real (non-fake) lights in
 the scene: unchanged. `?debug` panel is lazy-imported and gated, zero cost
 when absent from the URL.
+
+## White edge outline on props (third pass — the real cause)
+
+Report: a white outline on the edges of *some* parts of *some* objects (cot
+rails, tent trim, guy-ropes), flickering as the camera rotates, gone with the
+lights off. Two earlier passes at this — stripping the shared
+roughness/metalness map, then upgrading the kit to `MeshPhysicalMaterial` and
+pinning `specularIntensity` — landed in `useKit.ts` and **never ran**:
+
+```
+console: KITPROBE-throw Cannot read properties of undefined (reading 'x')
+  at _Vector2.copy
+  at MeshPhysicalMaterial.copy
+```
+
+`new THREE.MeshPhysicalMaterial().copy(standardMaterial)` reads physical-only
+fields off the source (`source.clearcoatNormalScale.copy(...)`), which a
+`MeshStandardMaterial` doesn't have. It threw on the first mesh in the
+traversal; the once-only guard was already set, so every later `useKit()` call
+skipped the block. Nothing was upgraded, `specularIntensity` was never written,
+and `ALL_STANDARD_MATERIALS` stayed empty — so the `?debug` panel's metalness
+and specular sliders were bound to an empty list, which is why moving them
+"helped but didn't clear it."
+
+Copy with `THREE.MeshStandardMaterial.prototype.copy.call(phys, m)` and restore
+`defines = { STANDARD: '', PHYSICAL: '' }` afterwards (the standard `copy`
+overwrites defines and dropping `PHYSICAL` compiles the standard shader, which
+has no `specularIntensity` in it).
+
+Ruled out on the way, each with a headless A/B (`tools/shot.mjs`, fixed crop,
+count of near-neutral bright pixels — 196 baseline):
+
+| Suspect | Test | Count | Verdict |
+|---|---|---|---|
+| Geometry aliasing | `?msaa=4` on the composer | 185 | not it (and costs 13ms) |
+| Texture minification | anisotropy 16 → 1 | 195 | not it |
+| Specular (as shipped) | `?spec=0` | 196 | no effect — the block was dead |
+| Albedo highlights in the pack's atlas | shader roll-off probe | 196 | no effect — same dead block |
+| Specular (block fixed) | `specularIntensity` 1.0 → 0.15 | 134 | **it** |
+
+Values: `useKit.ts` `specularIntensity` 0.15 (sweep: 1.0→196, 0.3→151,
+0.15→134, 0.04→113; under ~0.1 the tent weave and the glassware lose their
+surface). `CampHero.tsx` tent `roughness` 1.0 → 0.9 — the flattening was a
+workaround for the dead specular clamp, and at 0.9 the canvas gets its weave,
+seams and sag back with no edge highlight.
+
+Side effect worth knowing: the roughness/metalness-map strip and the specular
+clamp are now actually in force scene-wide, so the whole frame reads a little
+deeper and more saturated than the shots taken before this fix.
+
+## Aurora losing its shape after a long session
+
+Report: the curtains flatten into smooth bands/lines, no reliable repro —
+"maybe alt-tabbing or switching browser, so waiting a while."
+
+Cause is the sky clock's *magnitude*, not the lights or any tuned constant.
+`aurora()` drifts the sample point with `p.x += t * 0.035`, a straight
+translation, so the coordinate handed to `triNoise2d` grows without bound —
+and that field is built from `fract()`, whose resolution is the float ulp at
+whatever magnitude it gets. Reproduced in one shot with a dev offset
+(`?skyt=<seconds>`):
+
+| sky clock | drift in p.x | curtains |
+|---|---|---|
+| 0 | 0 | crisp |
+| 900 | 32 | crisp |
+| 1800 | 63 | indistinguishable from 0 |
+| 3600 | 126 | visibly broadened |
+| 7200 | 252 | flat wash, horizontal striping |
+| 36000 | 1260 | no structure at all |
+
+Isolated to that one term: at `?skyt=36000`, wrapping *the drift* restores the
+curtains exactly; wrapping the rotation inside `triNoise2d` (the only other
+place time enters) changes nothing.
+
+Fix, in `Effects.tsx`'s `Sky` — the shader and every tuned constant are
+untouched:
+
+1. The sky advances on clamped frame deltas instead of `clock.elapsedTime`. A
+   hidden tab stops rendering but the wall clock keeps counting, so coming back
+   to a tab left open for half an hour used to hand the shader a clock 1800s
+   further along in one step. Only time the sky was on screen counts now.
+2. The accumulator wraps at 1800s as a backstop, which the table above puts
+   well inside the clean range.
