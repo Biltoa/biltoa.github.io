@@ -158,30 +158,32 @@ white.
 
 ---
 
-## 13.5 — Pole torches → hanging lanterns
+## 13.5 — Pole torches → hanging lanterns — **REVERTED**
 
-`src/three/CampHero.tsx`.
+**Implemented, then reverted at the user's request. The free-standing pole
+torches are what ships.**
 
-**Deleted:** the `Torch` component (kit part `Torch`, a `TorchFlame` at
-`y = 1.66`), both of its instances per tent at
-`[±HALF_W * 0.72, 0, BACK + 0.35]`, the two 1.1 m `ContactShadow` patches under
-those poles, and the `HALF_W` constant that positioned them.
+`src/three/CampHero.tsx` is back to its pre-13 state for this sub-point:
 
-**Added:** `Lantern` — a short cord cylinder, the kit's `Lamp` mesh at scale
-0.8, and a `TorchFlame` with `single`, `scale` 0.42, `strength` 1, `light` 9.5,
-`reach` 4.6. Two per tent at `[±1.42, 1.52, BACK + 0.06]` in the tent's own
-frame (`LANTERN_LOCAL`).
+- `Torch` component restored — kit part `Torch` plus a `TorchFlame` at
+  `y = 1.66`, two per tent at `[±HALF_W * 0.72, 0, BACK + 0.35]`
+- `HALF_W = (TENT.rawWidth * TENT.scale) / 2` restored
+- `tentTorches(index)` restored (the grass shader's warm-light list is back on
+  the pole positions)
+- both 1.1 × 1.1 `ContactShadow` patches under the poles restored
 
-**Added:** `LanternPool` — a baked additive gradient quad, 2.2 × 2.2, colour
-`#ffb765`, opacity 0.16, one under each lantern. This is the fake bounce, not a
-seventh and eighth light.
+Removed again, and gone from the tree: the `Lantern` component, `LanternPool`,
+and the `LANTERN_LOCAL` constant. Nothing else in point 13 depended on them —
+the light count was 14 before, during and after, so no other sub-point moved.
 
-**Renamed:** `tentTorches(index)` → `tentLanterns(index)`, which feeds the grass
-shader's warm-light list. Positions moved with the lamps.
+The lantern version, if it is ever wanted back: two per tent at
+`[±1.42, 1.52, BACK + 0.06]` in the tent's own frame, kit `Lamp` mesh at scale
+0.8 on a short cord cylinder, `TorchFlame` with `single`, `scale` 0.42,
+`strength` 1, `light` 9.5, `reach` 4.6, plus a 2.2 × 2.2 additive gradient quad
+at `#ffb765` / 0.16 under each as the fake bounce. It is in git as part of
+commit `b90639f`.
 
-Light count is unchanged at 14 — six torch lights became six lantern lights — so
-`MOUNTED_POINT_LIGHTS` did not move and no material was recompiled. The light
-budget call is in DECISIONS.
+Frame time is unaffected either way — see 13.11.
 
 ---
 
@@ -389,15 +391,17 @@ the whole frame, and a flame undersized for its pit — is fixed under 13.2, 13.
 and 13.4. **If the layered rebuild is still wanted, it should be its own pass
 with its own budget; it is not a tweak.**
 
-**13.5 — all six lanterns are real lights.** The brief asks for six lanterns
-plus two campfire lights to be measured and scaled back if it costs frame time.
-It costs nothing here, because the six replaced six torch lights one for one:
-the scene's point-light count is unchanged at 14, which is the number the whole
-material-compile strategy is built around. Faking any of them would have *saved*
-nothing and cost a recompile. Measured frame time for the whole of point 13 is
-+2 ms at 1080p; none of it is attributable to the lanterns. Their reach came
-down (8.5 → 4.6) so each pool stops at its tent, which is the point of the
-change.
+**13.5 — the light budget question is moot, and the sub-point is reverted.**
+The brief asks for six lanterns plus two campfire lights to be measured and
+scaled back if they cost frame time. They cost nothing, because the six lanterns
+replaced six torch lights one for one — the scene's point-light count was
+unchanged at 14 throughout, which is the number the whole material-compile
+strategy is built around, so all six could stay real and none had to be faked.
+
+The user then asked for the pole torches back, so that is what ships. The
+decision above is recorded because the measurement stands either way and because
+the reasoning is what someone would need if they ever want the lanterns
+returned.
 
 **13.8 — geometry not replaced.** Simplifying the canopy meshes means editing
 `campsite-kit.glb`, and the brief says not to pull in new external assets. The

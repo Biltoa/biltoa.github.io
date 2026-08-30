@@ -242,6 +242,7 @@ const TENT = {
 } as const
 
 const BACK = (TENT.rawDepth * TENT.scale) / 2
+const HALF_W = (TENT.rawWidth * TENT.scale) / 2
 const TOP = TENT.rawHeight * TENT.scale
 
 /**
@@ -431,36 +432,17 @@ function tentDoorSpill(index: number) {
 }
 
 /** World positions of a tent's two door torches. */
-/**
- * World positions of a tent's two hanging lanterns.
- *
- * VISUAL-13.5 (2026-08-30): was `tentTorches`, at `HALF_W * 0.72` and
- * `BACK + 0.35` — two free-standing poles planted in the grass a metre outside
- * each tent. Lanterns hang on the tent's own front frame instead: closer in,
- * off the ground, and belonging to the tent rather than to the clearing. That
- * is the point of the change. A torch on the ground lights a patch of field; a
- * lantern on the frame gives the tent its own pool of warm light, which is what
- * claims it as somewhere to go and reinforces the click-to-enter affordance.
- */
-function tentLanterns(index: number) {
+/** World positions of a tent's two door torches. */
+function tentTorches(index: number) {
   const t = TENTS[index]
   const fx = Math.sin(t.yaw)
   const fz = Math.cos(t.yaw)
-  const depth = BACK + LANTERN_LOCAL.z
+  const depth = BACK + 0.35
   return [-1, 1].map((s) => {
-    const side = s * LANTERN_LOCAL.x
+    const side = s * HALF_W * 0.72
     return { x: t.x + fx * depth + fz * side, z: t.z + fz * depth - fx * side }
   })
 }
-
-/**
- * Where a lantern hangs, in the tent's own frame.
- *
- * `x` is out to the front frame poles either side of the doorway, `y` is
- * roughly shoulder height on them, `z` is a hand's width proud of the door
- * plane so the lamp hangs in front of the fabric rather than inside it.
- */
-const LANTERN_LOCAL = { x: 1.42, y: 1.52, z: 0.06 } as const
 
 /** Hermite ramp, clamped. */
 function smoothstep(a: number, b: number, x: number) {
@@ -1256,32 +1238,6 @@ function getDoorwaySpillTex() {
  * not the ground outside), so this is the same fake-pool trick as the
  * torches rather than a change to that light's reach.
  */
-/**
- * The warm patch a hanging lantern lays on the grass under it.
- *
- * A baked gradient quad rather than a second light: six lanterns already carry
- * a point source each, and what this is standing in for — the bounce off the
- * ground directly under a lamp — has no shape a point light would give it
- * anyway. See VISUAL-13.5.
- */
-function LanternPool({ position }: { position: [number, number, number] }) {
-  return (
-    <mesh rotation-x={-Math.PI / 2} position={position}>
-      <planeGeometry args={[2.2, 2.2]} />
-      <meshBasicMaterial
-        map={getDoorwaySpillTex()}
-        color="#ffb765"
-        transparent
-        opacity={0.16}
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-        toneMapped={false}
-        fog={false}
-      />
-    </mesh>
-  )
-}
-
 function DoorwaySpill({ position, color, opacity = 0.34 }: { position: [number, number, number]; color: THREE.Color; opacity?: number }) {
   return (
     <mesh rotation-x={-Math.PI / 2} position={position}>
@@ -1337,7 +1293,7 @@ function Prop({
  * tuned to match the grass it lit the tent front like a stage. Three lights is
  * about 2ms of a 32ms frame — the wrong 2ms to spend.
  */
-function Lantern({
+function Torch({
   position,
   seed,
   lit = true,
@@ -1349,36 +1305,10 @@ function Lantern({
   const kit = useKit()
   return (
     <group position={position}>
-      {/* The strap it hangs by. A lamp floating off a pole is a lamp nobody
-          believes; two centimetres of cord is the whole fix. */}
-      <mesh position={[0, 0.15, 0]}>
-        <cylinderGeometry args={[0.012, 0.012, 0.3, 5]} />
-        <meshStandardMaterial color="#6b563a" roughness={0.9} metalness={0} />
-      </mesh>
-      <group scale={0.8}>
-        {kit.parts('Lamp').map((p, i) => (
-          <mesh key={i} geometry={p.geometry} material={p.material} castShadow />
-        ))}
-      </group>
-      {/*
-        The candle inside the glass.
-
-        `single`, and small: a lantern flame is read through glass from several
-        metres away, so the crossed pair the torches use is two flat flames in
-        an X and nothing else. `reach` is short — 4.2 rather than the torch's
-        8.5 — because the point of the change is a pool that stops at the tent
-        rather than a light that washes the clearing.
-      */}
-      <TorchFlame
-        position={[0, 0.2, 0]}
-        seed={seed}
-        scale={0.42}
-        strength={1}
-        light={9.5}
-        reach={4.6}
-        single
-        lit={lit}
-      />
+      {kit.parts('Torch').map((p, i) => (
+        <mesh key={i} geometry={p.geometry} material={p.material} castShadow />
+      ))}
+      <TorchFlame position={[0, 1.66, 0]} seed={seed} lit={lit} />
     </group>
   )
 }
@@ -2069,29 +1999,24 @@ function Tent({
         />
       </group>
 
-      {/* Lanterns hung on the front frame, one either side of the doorway.
-          See VISUAL-13.5 and `tentLanterns`. */}
-      <Lantern
-        position={[-LANTERN_LOCAL.x, LANTERN_LOCAL.y, BACK + LANTERN_LOCAL.z]}
-        seed={index * 2.3}
-        lit={here}
-      />
-      <Lantern
-        position={[LANTERN_LOCAL.x, LANTERN_LOCAL.y, BACK + LANTERN_LOCAL.z]}
-        seed={index * 2.3 + 1.7}
-        lit={here}
-      />
+      {/* Torches flanking the entrance. */}
+      <Torch position={[-HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3} lit={here} />
+      <Torch position={[HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3 + 1.7} lit={here} />
 
       {/* What plants the tent on the grass. The moon's shadow map covers the
           whole camp at three centimetres a texel, which at the foot of a wall
           is not enough to draw the dark line where canvas meets ground. */}
       <ContactShadow position={[0, 0.02, 0]} size={[3.7, 3.4]} opacity={0.26} />
-      {/* VISUAL-13.5 (2026-08-30): the two 1.1m contact patches that sat under
-          the free-standing torch poles are gone with the poles. What replaces
-          them is a wider, fainter warm pool under each lantern — a hanging lamp
-          does not stand on the grass, it pours onto it. */}
-      <LanternPool position={[-LANTERN_LOCAL.x, 0.03, BACK + LANTERN_LOCAL.z]} />
-      <LanternPool position={[LANTERN_LOCAL.x, 0.03, BACK + LANTERN_LOCAL.z]} />
+      <ContactShadow
+        position={[-HALF_W * 0.72, 0.02, BACK + 0.35]}
+        size={[1.1, 1.1]}
+        opacity={0.3}
+      />
+      <ContactShadow
+        position={[HALF_W * 0.72, 0.02, BACK + 0.35]}
+        size={[1.1, 1.1]}
+        opacity={0.3}
+      />
     </group>
   )
 }
@@ -2544,7 +2469,7 @@ function Scene({
         power: NIGHT.grassWarm.firePower,
       },
       ...[0, 1, 2].flatMap((i) =>
-        tentLanterns(i).map((p) => ({
+        tentTorches(i).map((p) => ({
           ...p,
           radius: NIGHT.grassWarm.torchRadius,
           power: NIGHT.grassWarm.torchPower,
