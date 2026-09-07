@@ -433,6 +433,7 @@ export function useUnityHost(
   { title, autoStart = false }: { title: string; autoStart?: boolean }
 ): UnityHost {
   const instanceRef = useRef<UnityInstance | null>(null)
+  const audioContextsRef = useRef<Set<AudioContext>>(new Set())
   const suffixRef = useRef<string | null>(null)
   const startPromiseRef = useRef<Promise<void> | null>(null)
   const stopPromiseRef = useRef<Promise<void> | null>(null)
@@ -489,6 +490,7 @@ export function useUnityHost(
       const stop = stopPromiseRef.current
       const instance = instanceRef.current
       instanceRef.current = null
+      audioContextsRef.current.clear()
 
       // Keep the constructor hook installed until both an in-flight start and
       // its possible stale-instance teardown have settled. Otherwise Unity can
@@ -601,6 +603,16 @@ export function useUnityHost(
               await teardown(created, priorContexts)
               return null
             }
+            const ownedContexts = Array.from(engineContexts).filter(
+              (context) => !priorContexts.has(context) && context !== campAudioContext()
+            )
+            const knownContext = created.Module?.WEBAudio?.audioContext
+            if (knownContext && knownContext !== campAudioContext()) ownedContexts.push(knownContext)
+            audioContextsRef.current = new Set(ownedContexts)
+            if (import.meta.env.DEV) {
+              canvas.dataset.unityAudioCaptured = String(ownedContexts.length)
+              canvas.dataset.unityAudioModule = String(Boolean(knownContext))
+            }
             return created
           } catch (reason) {
             await silenceEngine(
@@ -650,10 +662,30 @@ export function useUnityHost(
   }, [autoStart, status, start])
 
   const toggleMute = useCallback(() => {
-    const ctx = instanceRef.current?.Module?.WEBAudio?.audioContext
-    if (!ctx) return
-    if (muted) ctx.resume().catch(() => {})
-    else ctx.suspend().catch(() => {})
+    const contexts = new Set(audioContextsRef.current)
+    const knownContext = instanceRef.current?.Module?.WEBAudio?.audioContext
+    if (knownContext && knownContext !== campAudioContext()) contexts.add(knownContext)
+    // Some Unity versions build their graph before the instance object is
+    // populated. The constructor hook still captures those contexts globally.
+    if (contexts.size === 0) {
+      for (const context of engineContexts) {
+        if (context !== campAudioContext()) contexts.add(context)
+      }
+    }
+    if (contexts.size === 0) return
+    const operations = Array.from(contexts, (context) =>
+      muted ? context.resume().catch(() => {}) : context.suspend().catch(() => {})
+    )
+    if (import.meta.env.DEV) {
+      void Promise.allSettled(operations).then(() => {
+        if (canvasRef.current) {
+          canvasRef.current.dataset.unityAudioStates = Array.from(
+            contexts,
+            (context) => context.state
+          ).join(',')
+        }
+      })
+    }
     markProfileEvent(muted ? 'audio-resumed' : 'audio-suspended', { category: 'unity' })
     setMuted((m) => !m)
   }, [muted])
@@ -673,6 +705,7 @@ export function useUnityHost(
     const start = startPromiseRef.current
     const instance = instanceRef.current
     instanceRef.current = null
+    audioContextsRef.current.clear()
 
     const instanceTeardown = instance
       ? enqueueUnityOperation(() => teardown(instance))

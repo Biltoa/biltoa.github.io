@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
-import { sfxBookClose, sfxBookOpen, sfxPageTurn } from '../../lib/audio'
+import {
+  sfxBookClose,
+  sfxBookOpen,
+  sfxPageDrag,
+  sfxPageLand,
+  sfxPageTurn,
+  sfxUiClick,
+  sfxUiHover,
+} from '../../lib/audio'
 import { damp } from '../../lib/scroll'
 import { BOOK_COVER_SUBTITLE, BOOK_TITLE, bookSpreads } from './bookContent'
 import {
@@ -1283,7 +1291,6 @@ export default function Book({
     dragEndpoint.current = null
     setHits([])
     setPlates([])
-    sfxPageTurn()
     return true
   }
 
@@ -1317,7 +1324,7 @@ export default function Book({
     // which is exactly what makes a turn read as a texture swap rather than as
     // paper. The half the sheet is landing *on* keeps its old page until the
     // sheet covers it — the sheet's own back face is what replaces it.
-    stageTurn(to, dir, 'commit')
+    if (stageTurn(to, dir, 'commit')) sfxPageTurn()
   }
 
   const pointerX = (event: ThreeEvent<PointerEvent>) => event.nativeEvent.clientX
@@ -1346,6 +1353,7 @@ export default function Book({
     const dx = pointerX(event) - drag.startX
     if (!drag.started && Math.abs(dx) >= 4) {
       drag.started = stageTurn(drag.to, drag.dir, 'drag')
+      if (drag.started) sfxPageDrag()
     }
     if (!drag.started) return
 
@@ -1373,8 +1381,10 @@ export default function Book({
       // readable authored turn instead of teleporting to the far block.
       turn.current.t = inverseTurnEase(turn.current.t)
       turn.current.mode = 'commit'
+      sfxPageLand(true)
     } else {
       turn.current.mode = 'cancel'
+      sfxPageLand(false)
     }
   }
 
@@ -2063,6 +2073,7 @@ function PageMark({
       renderOrder={2}
       onPointerOver={(e) => {
         e.stopPropagation()
+        sfxUiHover()
         onOver()
         document.body.classList.add(cursor === 'zoom' ? 'camp-zoom' : 'camp-hover')
       }}
@@ -2078,6 +2089,7 @@ function PageMark({
       onPointerUp={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation()
+        sfxUiClick()
         onClick()
       }}
     >

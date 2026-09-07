@@ -22,7 +22,7 @@ import { KernelSize, ToneMappingMode, type OutlineEffect } from 'postprocessing'
 import * as THREE from 'three'
 import { clamp01, damp, easeInOutCubic, scrollDriver } from '../lib/scroll'
 import { GRAPHICS_DPR } from '../lib/graphics'
-import { sfxEnter, sfxExit, sfxHover, tickAudio } from '../lib/audio'
+import { sfxEnter, sfxExit, sfxHover, sfxUiClick, sfxUiHover, tickAudio } from '../lib/audio'
 import {
   ALL_STANDARD_MATERIALS,
   collectParts,
@@ -2840,15 +2840,11 @@ void main() {`
       }
     }
     const flick = fireFlicker(state.clock.elapsedTime * 0.8 + index)
-    // Let the visible wick light the room while the closed journal is being
-    // approached. As soon as the cover starts to lift, return this source to
-    // the exact 0.1 value the pages were tuned against; the overhead reading
-    // source and every page material remain unchanged. The short fade finishes
-    // before the printed faces are exposed, avoiding both a lighting pop and
-    // the old blown-paper/glass problem caused by an always-bright wick.
+    // The visible wick remains a stable part of the room while the journal is
+    // opened. Page readability is owned by the high, even reading source and
+    // the page materials, so the book never appears to switch the lantern off.
     if (lantern.current) {
-      const pageProtection = smoothstep(0, 0.1, bookOpen.current)
-      lantern.current.intensity = THREE.MathUtils.lerp(0.72, 0.1, pageProtection) * flick * k
+      lantern.current.intensity = 0.72 * flick * k
     }
     if (lanternSpill.current) lanternSpill.current.intensity = 3.2 * flick * k
     if (readLight.current) readLight.current.intensity = 0.6 * k
@@ -2880,7 +2876,10 @@ void main() {`
           rotation-y={TENT.flip}
           onClick={(e) => {
             e.stopPropagation()
-            if (entered === null) onEnter(index as TentIndex)
+            if (entered === null) {
+              sfxUiClick()
+              onEnter(index as TentIndex)
+            }
           }}
           onPointerOver={(e) => {
             e.stopPropagation()
@@ -2998,7 +2997,6 @@ function TentSign({
   onEnter: (i: TentIndex) => void
   entered: number | null
 }) {
-  if (entered !== null) return null
   const sign = tentFrame(index).sign
 
   return (
@@ -3009,18 +3007,24 @@ function TentSign({
       // block on screen. Keep only a small additional drop while leaving clear
       // air between the chevron and the crossed poles.
       position={[sign.x, TOP + 0.77, sign.z]}
-      style={{ pointerEvents: 'auto', userSelect: 'none' }}
+      style={{ pointerEvents: entered === null ? 'auto' : 'none', userSelect: 'none' }}
       zIndexRange={[8, 0]}
     >
       <div
         className={`tentsign${hovered === index ? ' is-hot' : ''}`}
+        data-hidden={entered !== null}
+        aria-hidden={entered !== null}
         style={{
           ['--tent-color' as string]: TENT_TINT[index],
           ['--tent-glow' as string]: TENT_GLOW[index],
         }}
         onPointerEnter={() => onHover(index as TentIndex, 'label')}
         onPointerLeave={() => onHover(null, 'label')}
-        onClick={() => onEnter(index as TentIndex)}
+        onClick={() => {
+          if (entered !== null) return
+          sfxUiClick()
+          onEnter(index as TentIndex)
+        }}
       >
         <span className="tentsign__label">{TENT_LABEL[index]}</span>
         {/* Hollow chevron with a short cap turning outward at the top of each
@@ -3642,7 +3646,11 @@ function Scene({
     ) {
       return
     }
-    setBookHovered((current) => (hot ? index : current === index ? null : current))
+    setBookHovered((current) => {
+      const next = hot ? index : current === index ? null : current
+      if (hot && next !== current) sfxUiHover()
+      return next
+    })
   }, [])
 
   const clearAllHover = useCallback(() => {

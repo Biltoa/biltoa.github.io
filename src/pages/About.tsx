@@ -452,6 +452,7 @@ export default function About() {
             <>
               <button
                 className="tentswitch audioswitch"
+                data-sfx="toggle"
                 onClick={() => setMuted(!audioMuted)}
                 aria-pressed={!audioMuted}
                 aria-label={audioMuted ? 'Unmute ambience' : 'Mute ambience'}
@@ -461,6 +462,7 @@ export default function About() {
 
               <button
                 className="doorback"
+                data-sfx="back"
                 data-hidden={!inRoom || playingFrom !== null || zoomed !== null}
                 data-guarding={guardingBackClick}
                 onClick={handleBackToFire}

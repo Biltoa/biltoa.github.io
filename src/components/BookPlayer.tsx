@@ -108,47 +108,60 @@ export default function BookPlayer({
       <div className="bookplayer__frame" style={frame}>
         <canvas ref={canvasRef} id="unity-canvas" tabIndex={-1} />
 
-        {unity.status !== 'ready' && (
-          <div className="bookplayer__veil">
-            {unity.status === 'missing' && (
-              <div>
-                <h3>No build installed</h3>
-                <p>
-                  Drop a Unity WebGL build into <code>public/unity/Build/</code> and this page picks
-                  it up.
-                </p>
-              </div>
-            )}
-
-            {(unity.status === 'probing' || unity.status === 'idle' || unity.status === 'loading') && (
-              <div style={{ width: 'min(420px, 74%)' }}>
-                <p className="mono bookplayer__label">Loading the build</p>
-                <div className="bookplayer__bar">
-                  <i style={{ width: `${pct}%` }} />
+        <div className="bookplayer__veil" data-hidden={unity.status === 'ready'}>
+          {unity.status !== 'ready' && (
+            <>
+              {unity.status === 'missing' && (
+                <div>
+                  <h3>No build installed</h3>
+                  <p>
+                    Drop a Unity WebGL build into <code>public/unity/Build/</code> and this page
+                    picks it up.
+                  </p>
                 </div>
-                <p className="mono bookplayer__pct">{pct}%</p>
-              </div>
-            )}
+              )}
 
-            {unity.status === 'error' && (
-              <div>
-                <h3>Build failed to start</h3>
-                <p>{unity.error}</p>
-              </div>
-            )}
-          </div>
-        )}
+              {(unity.status === 'probing' ||
+                unity.status === 'idle' ||
+                unity.status === 'loading') && (
+                <div style={{ width: 'min(420px, 74%)' }}>
+                  <p className="mono bookplayer__label">Loading the build</p>
+                  <div className="bookplayer__bar">
+                    <i style={{ width: `${pct}%` }} />
+                  </div>
+                  <p className="mono bookplayer__pct">{pct}%</p>
+                </div>
+              )}
+
+              {unity.status === 'error' && (
+                <div>
+                  <h3>Build failed to start</h3>
+                  <p>{unity.error}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
         <div className="bookplayer__controls">
-          <button className="btn btn--ghost" onClick={unity.fullscreen} disabled={unity.status !== 'ready'}>
-            ⛶ Fullscreen
+          <button className="btn btn--ghost" data-sfx="back" onClick={close}>
+            ← Back to the journal <kbd>Esc</kbd>
           </button>
-          <button className="btn btn--ghost" onClick={unity.toggleMute} disabled={unity.status !== 'ready'}>
+          <button
+            className="btn btn--ghost"
+            data-sfx="toggle"
+            onClick={unity.toggleMute}
+            disabled={unity.status !== 'ready'}
+          >
             {unity.muted ? '🔇 Unmute' : '🔊 Mute'}
           </button>
-          <span className="spacer" />
-          <button className="btn btn--ghost" onClick={close}>
-            ← Back to the journal <kbd>Esc</kbd>
+          <button
+            className="btn btn--ghost"
+            data-sfx="fullscreen"
+            onClick={unity.fullscreen}
+            disabled={unity.status !== 'ready'}
+          >
+            ⛶ Fullscreen
           </button>
         </div>
       </div>

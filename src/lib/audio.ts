@@ -1,10 +1,9 @@
 /**
  * Campsite audio, synthesised in the Web Audio API.
  *
- * Nothing is downloaded: fire, wind and grass are all filtered noise, and the
- * interface sounds are short FM blips. That keeps the page free of audio
- * licensing questions entirely, keeps the payload at zero bytes, and lets the
- * fire's crackle density track the same flicker value the light uses.
+ * Fire, wind, grass, paper and leather are synthesised from filtered noise.
+ * Tiny CC0 Kenney samples give ordinary controls a more tactile accent; synth
+ * fallbacks keep every interaction audible if a browser cannot decode Ogg.
  *
  * Browsers block audio until a gesture, so nothing starts until `resume()` is
  * called from a real click, keypress or scroll.
@@ -21,6 +20,19 @@ let windGain: GainNode | null = null
 let crackleTimer = 0
 let started = false
 let muted = false
+
+type UiSample = 'hover' | 'click' | 'toggle' | 'fullscreen' | 'back'
+
+const UI_SAMPLE_URLS: Record<UiSample, string> = {
+  hover: '/audio/ui-hover.ogg',
+  click: '/audio/ui-click.ogg',
+  toggle: '/audio/ui-toggle.ogg',
+  fullscreen: '/audio/ui-fullscreen.ogg',
+  back: '/audio/ui-back.ogg',
+}
+
+const uiSamples = new Map<UiSample, AudioBuffer>()
+let uiSampleLoad: Promise<void> | null = null
 
 const TRANSIENT_NOISE_SECONDS = 8
 
@@ -73,6 +85,26 @@ function ensure(): Ctx | null {
   return ctx
 }
 
+function preloadUiSamples(context: AudioContext) {
+  if (uiSampleLoad) return uiSampleLoad
+  uiSampleLoad = Promise.all(
+    Object.entries(UI_SAMPLE_URLS).map(async ([name, url]) => {
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`Could not load ${url}`)
+      const buffer = await context.decodeAudioData(await response.arrayBuffer())
+      uiSamples.set(name as UiSample, buffer)
+    })
+  )
+    .then(() => undefined)
+    .catch(() => {
+      // A failed accent sound must never take the campsite down. The synth
+      // fallbacks below remain available if a file is unavailable or a browser
+      // cannot decode Ogg.
+      uiSampleLoad = null
+    })
+  return uiSampleLoad
+}
+
 /**
  * Builds the suspended Web Audio graph while the loading curtain is present.
  * Browsers still require a gesture before `resume()`, but graph construction
@@ -83,6 +115,7 @@ export function primeAudio() {
   const c = ensure()
   if (!c) return
   startAmbient()
+  void preloadUiSamples(c)
 }
 
 /** Builds the looping ambience. Safe to call repeatedly. */
@@ -307,10 +340,52 @@ function paper({
   src.stop(now + duration + 0.1)
 }
 
+function uiSample(name: UiSample, gainValue: number, playbackRate = 1) {
+  const c = ctx
+  const buffer = uiSamples.get(name)
+  if (!c || !master || muted || !buffer) return false
+  const source = c.createBufferSource()
+  const gain = c.createGain()
+  source.buffer = buffer
+  source.playbackRate.value = playbackRate
+  gain.gain.value = gainValue
+  source.connect(gain).connect(master)
+  source.start()
+  return true
+}
+
+/** Quiet tactile accent for ordinary DOM and printed-page controls. */
+export function sfxUiHover() {
+  if (!uiSample('hover', 0.18, 0.98 + Math.random() * 0.05)) {
+    blip({ freq: 760, to: 920, duration: 0.055, type: 'sine', gain: 0.018 })
+  }
+}
+
+export function sfxUiClick(kind: 'click' | 'toggle' | 'fullscreen' | 'back' = 'click') {
+  if (!uiSample(kind, kind === 'click' ? 0.24 : 0.28)) {
+    blip({ freq: 390, to: 300, duration: 0.08, type: 'triangle', gain: 0.035 })
+  }
+}
+
 /** A leaf going over. */
 export function sfxPageTurn() {
   paper({ duration: 0.40, from: 800, to: 2500, gain: 0.10 })
   paper({ duration: 0.26, from: 1600, to: 3400, gain: 0.05, q: 1.6, delay: 0.06 })
+}
+
+/** A drag starts with a short lift; the landing waits for pointer release. */
+export function sfxPageDrag() {
+  paper({ duration: 0.2, from: 950, to: 2350, gain: 0.065, q: 1.15 })
+}
+
+export function sfxPageLand(committed: boolean) {
+  paper({
+    duration: committed ? 0.25 : 0.16,
+    from: committed ? 2400 : 1550,
+    to: committed ? 720 : 980,
+    gain: committed ? 0.075 : 0.04,
+    q: 0.85,
+  })
 }
 
 /**
@@ -375,9 +450,20 @@ export function resumeAudio() {
   if (!muted) fadeMaster(0.9)
 }
 
+/** Unlock interaction sounds without starting the campsite ambience. */
+export function resumeInteractionAudio() {
+  const c = ensure()
+  if (!c) return
+  void preloadUiSamples(c)
+  if (c.state === 'suspended') void c.resume()
+  if (!started && !muted && master) master.gain.value = 0.9
+}
+
 export function setMuted(next: boolean) {
+  const wasMuted = muted
   muted = next
   fadeMaster(next ? 0.0001 : 0.9)
+  if (wasMuted && !next) sfxUiClick('toggle')
   listeners.forEach((fn) => fn(next))
 }
 

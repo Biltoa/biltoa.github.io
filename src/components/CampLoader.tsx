@@ -60,13 +60,12 @@ const LOADER_EMBERS: EmberStyle[] = (() => {
 
   return Array.from({ length: 34 }, () => ({
     '--ember-x': `${20 + random() * 60}%`,
-    '--ember-y': `${65 + random() * 20}%`,
+    '--ember-y': `${38 + random() * 38}%`,
     '--ember-drift': `${(random() - 0.5) * 58}px`,
-    '--ember-rise': `${-(72 + random() * 96)}px`,
-    '--ember-size': `${0.9 + random() * 1.7}px`,
+    '--ember-rise': `${-(82 + random() * 106)}px`,
+    '--ember-size': `${1.35 + random() * 1.85}px`,
     '--ember-duration': `${2.15 + random() * 2.45}s`,
     '--ember-delay': `${-random() * 4.6}s`,
-    '--ember-glow': `${3.4 + random() * 2.8}px`,
   }))
 })()
 
@@ -140,14 +139,6 @@ export default function CampLoader({
             <i key={index} style={style} />
           ))}
         </span>
-        {/* The same ember diamond and hairline the landing copy uses, so the
-            curtain and what is behind it are visibly the same site. */}
-        <div className="camploader__fire" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </div>
-
         <h1 className="camploader__title">
           {profile.name.split(' ')[0]}
           <br />

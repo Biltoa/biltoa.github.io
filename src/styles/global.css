@@ -821,7 +821,16 @@ select {
   justify-items: center;
   gap: 6px;
   cursor: none;
-  transition: transform 0.25s var(--ease);
+  opacity: 1;
+  transition:
+    opacity 0.38s var(--ease),
+    transform 0.25s var(--ease);
+}
+
+.tentsign[data-hidden='true'] {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
 }
 
 .tentsign__label {
@@ -2419,12 +2428,13 @@ body.camp-hover .campui__cursor-ring {
   gap: 18px;
   padding: 0 var(--gutter);
   text-align: center;
+  transform: translateY(clamp(-30px, -3vh, -14px));
 }
 
 .camploader__embers {
   position: absolute;
   z-index: 0;
-  inset: -96px -110px -82px;
+  inset: -88px -110px -72px;
   pointer-events: none;
   contain: layout style;
 }
@@ -2436,10 +2446,7 @@ body.camp-hover .campui__cursor-ring {
   width: var(--ember-size);
   height: var(--ember-size);
   border-radius: 50%;
-  background: #ffc35c;
-  box-shadow:
-    0 0 var(--ember-glow) rgba(255, 190, 82, 0.95),
-    0 0 calc(var(--ember-glow) * 2.4) rgba(255, 108, 28, 0.52);
+  background: #dda05a;
   opacity: 0;
   transform: translate3d(0, 10px, 0) scale(0.45);
   animation: camploader-float var(--ember-duration) linear var(--ember-delay) infinite;
@@ -2466,47 +2473,6 @@ body.camp-hover .campui__cursor-ring {
 .camploader__inner > :not(.camploader__embers) {
   position: relative;
   z-index: 1;
-}
-
-/* Three ember diamonds, breathing on the same offsets the campfire flickers on
-   — see fireFlicker in campsite/fire.ts. The point is that the loading screen is
-   already the campsite: same light, same colour, one object fewer. */
-.camploader__fire {
-  display: flex;
-  align-items: flex-end;
-  gap: 7px;
-  height: 26px;
-}
-
-.camploader__fire i {
-  width: 9px;
-  height: 9px;
-  transform: rotate(45deg);
-  background: #ffba60;
-  box-shadow: 0 0 14px rgba(255, 168, 72, 0.85), 0 0 34px rgba(255, 120, 40, 0.5);
-  animation: camploader-ember 1.9s var(--ease) infinite;
-}
-
-.camploader__fire i:nth-child(2) {
-  animation-delay: 0.28s;
-  background: #ffd79a;
-}
-
-.camploader__fire i:nth-child(3) {
-  animation-delay: 0.62s;
-  opacity: 0.7;
-}
-
-@keyframes camploader-ember {
-  0%,
-  100% {
-    transform: rotate(45deg) translateY(0) scale(1);
-    opacity: 0.55;
-  }
-  45% {
-    transform: rotate(45deg) translateY(-7px) scale(1.16);
-    opacity: 1;
-  }
 }
 
 .camploader__title {
@@ -2576,7 +2542,6 @@ body.camp-hover .campui__cursor-ring {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .camploader__fire i,
   .camploader__embers i,
   .camploader__rail::after {
     animation: none;
@@ -2676,6 +2641,20 @@ html.is-loading body {
   padding: 24px;
   color: var(--paper);
   background: rgba(6, 9, 14, 0.86);
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 280ms var(--ease),
+    visibility 0s linear 0s;
+}
+
+.bookplayer__veil[data-hidden='true'] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 280ms var(--ease),
+    visibility 0s linear 280ms;
 }
 
 .bookplayer__label {
@@ -2718,12 +2697,12 @@ html.is-loading body {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  top: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: linear-gradient(to top, rgba(4, 6, 10, 0.82), rgba(4, 6, 10, 0));
+  background: linear-gradient(to bottom, rgba(4, 6, 10, 0.82), rgba(4, 6, 10, 0));
   /* Hidden until the frame has arrived: controls sliding around inside a
      growing box read as a bug. */
   opacity: 0;
@@ -2734,8 +2713,17 @@ html.is-loading body {
   opacity: 1;
 }
 
-.bookplayer__controls .spacer {
-  flex: 1;
+.bookplayer__controls .btn {
+  transition:
+    opacity 220ms var(--ease),
+    color 220ms var(--ease),
+    background-color 220ms var(--ease),
+    border-color 220ms var(--ease),
+    transform 220ms var(--ease);
+}
+
+.bookplayer__controls .btn:disabled {
+  opacity: 0.34;
 }
 
 .bookplayer__controls kbd {

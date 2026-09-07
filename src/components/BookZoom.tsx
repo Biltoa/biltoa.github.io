@@ -98,7 +98,12 @@ export default function BookZoom({
     <div className="bookzoom" data-phase={phase}>
       {/* Pressing anywhere off the picture goes back, the way putting a page
           down does. The button is still there for anyone who wants a target. */}
-      <button className="bookzoom__scrim" onClick={close} aria-label="Back to the page" />
+      <button
+        className="bookzoom__scrim"
+        data-sfx="back"
+        onClick={close}
+        aria-label="Back to the page"
+      />
 
       <figure className="bookzoom__frame" style={frame}>
         <img
@@ -112,7 +117,7 @@ export default function BookZoom({
         />
       </figure>
 
-      <button className="bookzoom__back" onClick={close}>
+      <button className="bookzoom__back" data-sfx="back" onClick={close}>
         ← Back to the page <kbd>Esc</kbd>
       </button>
     </div>

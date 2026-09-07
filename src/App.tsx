@@ -4,6 +4,7 @@ import BackToFire from './components/BackToFire'
 import Footer from './components/Footer'
 import About from './pages/About'
 import ProjectDetail from './pages/ProjectDetail'
+import { resumeInteractionAudio, sfxUiClick, sfxUiHover } from './lib/audio'
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -22,6 +23,36 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = 'light'
+  }, [])
+
+  useEffect(() => {
+    const selector = 'button:not(:disabled), a[href], [role="button"]:not([aria-disabled="true"])'
+    const targetFor = (target: EventTarget | null) =>
+      target instanceof Element ? (target.closest(selector) as HTMLElement | null) : null
+
+    const unlock = () => resumeInteractionAudio()
+    const hover = (event: PointerEvent) => {
+      const target = targetFor(event.target)
+      if (!target || (event.relatedTarget instanceof Node && target.contains(event.relatedTarget))) return
+      sfxUiHover()
+    }
+    const click = (event: MouseEvent) => {
+      const target = targetFor(event.target)
+      if (!target) return
+      const kind = target.dataset.sfx
+      sfxUiClick(
+        kind === 'toggle' || kind === 'fullscreen' || kind === 'back' ? kind : 'click'
+      )
+    }
+
+    window.addEventListener('pointerdown', unlock, true)
+    document.addEventListener('pointerover', hover)
+    document.addEventListener('click', click, true)
+    return () => {
+      window.removeEventListener('pointerdown', unlock, true)
+      document.removeEventListener('pointerover', hover)
+      document.removeEventListener('click', click, true)
+    }
   }, [])
 
   // The camp is warm paper; the written-out work is a dark reading surface set
