@@ -29,16 +29,21 @@ they are not a dead end.
 
 ## The campsite
 
-`src/three/CampHero.tsx` plus `src/three/campsite/`. Three tents round a fire in a night forest,
-built from the *Dreamscape Nature: Campsite* Unity pack. Scroll moves focus between them. Clicking
-one walks the camera across the clearing, ducks it through the doorway, and settles over a journal
-lying open on a bench inside. Esc or the Back button walks you out.
+`src/three/CampHero.tsx` plus `src/three/campsite/`. Three canvas A-frame tents round a fire in a
+night forest, with the environment built from the *Dreamscape Nature: Campsite* Unity pack and the tent
+mesh loaded from `public/models/canvas-cabin.glb`. Scroll moves focus between them. Clicking one
+walks the camera across the clearing, ducks it through the doorway, and settles over a journal lying
+open on a bench inside. Esc or the Back button walks you out.
+
+The three shells share one matte, triplanar woven-canvas treatment and one
+weathered-wood frame treatment. Their canvas bases are deliberately distinct:
+olive About, warm-sand Gameplay, and smoky blue-charcoal Projects.
 
 Each tent is dressed: a bedroll and pillow down one wall, a bench against the back with a lit candle
-at each end and the journal between them, a cushion on the floor in front of it, a shelf of the
-pack's glassware, a pack and a heap of cushions in the corners. The room is a good deal smaller than
-the mesh suggests — the tent's raw width is mostly guy ropes, and ray-casting the canvas puts the
-walls about 1.6m out, which is what `ROOM_HALF_W` encodes.
+at each end and the journal between them, a cushion on the floor in front of it, and a small cushion
+heap in the corner. The old shelf/glassware and backpack were removed when the shallower A-frame
+replaced the pavilion because both intersected its walls. The room dressing remains in the
+tent-local frame so the shell can change without changing any journal content.
 
 `?room=0|1|2` deep-links straight inside a tent — that is also how the interiors get screenshotted
 without waiting out the walk-in. In dev, `?travel=0.55` freezes the walk-in part-way and snaps the
@@ -46,6 +51,16 @@ camera there, `?book=0|1` pins how far the journal has opened, `?reveal=1` pins 
 sets the aurora's gain (0 turns the march off, which is how its share of the frame budget gets
 measured), and `?fps=1` shows a frame-time readout — mean *and worst*, because a scene that averages
 60 and drops a 40ms frame every second feels far worse than one sitting steadily at 45.
+
+On a local server the profiler records automatically unless `?fps=0` is present. Every session writes
+three synchronized files to `Desktop/Portfolio FPS Profiles`: exact per-frame CSV data, an event CSV,
+and a summary JSON with percentiles, 1% low, stall counts, the twenty worst frames, and browser/device
+context. The event timeline labels camp navigation and loading, player transitions, Unity preload /
+create / ready / teardown stages, clicks, visibility changes, browser long tasks, and every frame over
+100ms; uncaught errors and rejected promises are recorded as critical events. The on-screen graph uses
+the worst frame in each 100ms bucket, keeps about 24 seconds visible,
+draws event ticks, and gives multi-second stalls a logarithmic overflow band instead of flattening
+everything above 50ms into the same line.
 
 ### Screenshotting it
 
@@ -201,9 +216,12 @@ link rectangles back as it goes.
   to the doorway, both in the tent's own neon colour, and hovering either the label or the tent
   lights both.
 
-The three tents share one mesh and one texture set, tinted red / blue / gold. The tent colour map is
-converted to greyscale during texture prep — the pack paints it warm tan, and multiplying a brand
-colour over tan turns blue into brown.
+The three tents share the supplied Meshy A-frame mesh, re-exported by
+`tools/split-aframe-materials.py` with real `AFrame_Cloth` and `AFrame_Wood` material primitives.
+The cloth no longer samples Meshy's contaminated colour, normal, or packed roughness atlases. It
+uses one warm off-white colour plus the same object-space triplanar plain weave on every shell, so
+the texture stays continuous and identical across all three tents. The beams and knots retain their
+authored atlas on the separate wood primitive.
 
 ### Rebuilding the campsite assets
 
@@ -396,11 +414,13 @@ caching) are in [`public/unity/README.md`](public/unity/README.md).
 
 Two gotchas worth knowing up front:
 
-- Use **Compression Format: Disabled** while testing locally. Vite's dev server does not send the
-  `Content-Encoding` header a Brotli build needs, so a compressed build fails to load under
-  `npm run dev` unless you configure that yourself.
-- `public/unity/Build/` is gitignored, because WebGL builds are large. Use Git LFS or push it with
-  the deploy.
+- Brotli `.unityweb` builds are supported by the Vite dev/preview servers. The response-header
+  middleware in `vite.config.ts` supplies the encoding and MIME types Unity requires; `public/.htaccess`
+  carries the equivalent settings to an Apache/cPanel deployment.
+- `public/unity/Build/WebGL.data.unityweb` is intentionally gitignored because it is 244 MiB.
+  GitHub Pages cannot serve Git LFS objects, so the payload lives in the `unity-webgl-v1` GitHub
+  Release. The Pages workflow downloads it before the production build and publishes it in the
+  same-origin site artifact. The loader, framework, and WebAssembly files stay in normal Git.
 
 ---
 
@@ -426,8 +446,9 @@ hit on `/projects/realistic-hajwala` 404s.
 
 - **Netlify** — a `_redirects` file containing `/*  /index.html  200`.
 - **Vercel** — works out of the box.
-- **GitHub Pages** — set `base: '/repo-name/'` in `vite.config.ts` and copy `index.html` to
-  `404.html`.
+- **GitHub Pages** — this user-site repository deploys from `.github/workflows/deploy-pages.yml`.
+  It downloads the Unity release payload, builds the app, and uploads `dist/`. `public/CNAME`
+  preserves `ahmadbilto.com`, while `public/404.html` returns direct SPA routes to the app.
 
 The résumé is served from `public/Ahmad-Bilto-Resume.pdf`; replace that file when you update it.
 

@@ -18,7 +18,7 @@ import type { Binding } from './bookGeometry'
  * bottom margin and started dropping lines.
  */
 export const PAGE_W = 796
-export const PAGE_H = 1180
+export const PAGE_H = 1280
 
 const MARGIN_X = 84
 const MARGIN_TOP = 96
@@ -64,7 +64,7 @@ const PAPER_B = '#bda577'
  * is what identifies the tent, not brightness, so the hue is kept and the
  * luminance is pulled down until there is something to read.
  */
-function inkAccent(accent: string): string {
+function inkAccent(accent: string, target = 0.34): string {
   const hex = accent.replace('#', '')
   if (hex.length !== 6) return accent
 
@@ -74,8 +74,6 @@ function inkAccent(accent: string): string {
 
   // Rec. 709 luma, against paper that sits around 0.85.
   const luma = () => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-  const target = 0.34
-
   if (luma() > target) {
     const k = target / luma()
     r = Math.round(r * k)
@@ -84,6 +82,24 @@ function inkAccent(accent: string): string {
   }
 
   return `rgb(${r}, ${g}, ${b})`
+}
+
+function mixInk(from: string, to: string, amount: number) {
+  const parse = (value: string) => {
+    const hex = value.match(/^#([0-9a-f]{6})$/i)?.[1]
+    if (hex) {
+      return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16),
+      ]
+    }
+    return (value.match(/[\d.]+/g) ?? ['0', '0', '0']).slice(0, 3).map(Number)
+  }
+  const a = parse(from)
+  const b = parse(to)
+  const t = Math.max(0, Math.min(1, amount))
+  return `rgb(${a.map((channel, i) => Math.round(channel + (b[i] - channel) * t)).join(', ')})`
 }
 
 /** Normalised page rectangle, 0..1, origin top-left. */
@@ -183,6 +199,11 @@ function fetchPrint(src: string, onEach?: (src: string) => void): Promise<void> 
  */
 export function preloadBookImages(srcs: string[], onEach?: (src: string) => void): Promise<void> {
   return Promise.all(srcs.map((src) => fetchPrint(src, onEach))).then(() => undefined)
+}
+
+/** Waits for every journal print already requested by the mounted books. */
+export function waitForBookImages(): Promise<void> {
+  return Promise.all([...inflight.values()]).then(() => undefined)
 }
 
 /** Whether a print has finished decoding. */
@@ -439,6 +460,16 @@ export function paintPage(
     folio: string
     seed: number
     paper?: boolean
+    /** Link whose glyphs should use the interactive hover ink. */
+    hoveredLink?: string | null
+    /** Image whose paper mount should use the interactive hover ink. */
+    hoveredImage?: string | null
+    linkHoverMix?: number
+    imageHoverMix?: number
+    /** Optional hover ink override; headers continue to use the base accent. */
+    hoverColor?: string
+    /** Optional brighter ink ceiling for books whose accent needs more lift. */
+    accentLuma?: number
     /**
      * Seed for the paper, when it is painted here.
      *
@@ -451,13 +482,16 @@ export function paintPage(
     paperSeed?: number
     /** Draws a page-turn control in the outer bottom corner. */
     arrow?: 'prev' | 'next'
+    /** Draws a compact jump-to-first/last control beside the folio. */
+    jump?: { kind: 'first' | 'last'; to: string }
   }
 ): Painted {
   const { side, accent, folio, seed } = opts
   // Everything printed *as ink* uses the darkened accent; the page-turn plate
   // keeps the bright one, because it is drawn as a tinted block rather than as
   // a letterform and needs to stay visible as a control.
-  const ink = inkAccent(accent)
+  const ink = inkAccent(accent, opts.accentLuma)
+  const hoverInk = opts.hoverColor ?? ink
   let turn: Rect | null = null
   ctx.clearRect(0, 0, PAGE_W, PAGE_H)
   // The paper is a separate layer from the writing, so the sheet can be there
@@ -588,11 +622,13 @@ export function paintPage(
       case 'link': {
         ctx.font = `600 31px ${SERIF}`
         const w = Math.min(ctx.measureText(line.text).width, COL)
-        ctx.fillStyle = INK
+        const linkInk =
+          opts.hoveredLink === line.to ? mixInk(INK, hoverInk, opts.linkHoverMix ?? 0) : INK
+        ctx.fillStyle = linkInk
         inkText(ctx, line.text, MARGIN_X + 26, y + 24, 0.6, rnd)
         // Marginal arrow instead of an underline: a link on paper is annotated,
         // not styled.
-        ctx.strokeStyle = ink
+        ctx.strokeStyle = linkInk
         ctx.lineWidth = 3
         ctx.beginPath()
         ctx.moveTo(MARGIN_X + 2, y + 16)
@@ -601,7 +637,7 @@ export function paintPage(
         ctx.lineTo(MARGIN_X + 16, y + 16)
         ctx.lineTo(MARGIN_X + 10, y + 22)
         ctx.stroke()
-        ctx.strokeStyle = 'rgba(120,80,40,0.5)'
+        ctx.strokeStyle = opts.hoveredLink === line.to ? linkInk : 'rgba(120,80,40,0.5)'
         ctx.lineWidth = 1.6
         ctx.beginPath()
         ctx.moveTo(MARGIN_X + 26, y + 33)
@@ -632,9 +668,11 @@ export function paintPage(
           const ly = y + Math.floor(i / 2) * 54
           if (ly > limit) break
           const w = Math.min(ctx.measureText(item.text).width, half - 40)
-          ctx.fillStyle = INK
+          const linkInk =
+            opts.hoveredLink === item.to ? mixInk(INK, hoverInk, opts.linkHoverMix ?? 0) : INK
+          ctx.fillStyle = linkInk
           inkText(ctx, item.text, lx + 26, ly + 24, 0.6, rnd)
-          ctx.strokeStyle = ink
+          ctx.strokeStyle = linkInk
           ctx.lineWidth = 3
           ctx.beginPath()
           ctx.moveTo(lx + 2, ly + 16)
@@ -643,7 +681,7 @@ export function paintPage(
           ctx.lineTo(lx + 16, ly + 16)
           ctx.lineTo(lx + 10, ly + 22)
           ctx.stroke()
-          ctx.strokeStyle = 'rgba(120,80,40,0.5)'
+          ctx.strokeStyle = opts.hoveredLink === item.to ? linkInk : 'rgba(120,80,40,0.5)'
           ctx.lineWidth = 1.6
           ctx.beginPath()
           ctx.moveTo(lx + 26, ly + 33)
@@ -679,7 +717,10 @@ export function paintPage(
         ctx.shadowColor = 'rgba(48,28,10,0.42)'
         ctx.shadowBlur = 16
         ctx.shadowOffsetY = 6
-        ctx.fillStyle = '#efe4c8'
+        ctx.fillStyle =
+          opts.hoveredImage === line.src
+            ? mixInk('#efe4c8', hoverInk, opts.imageHoverMix ?? 0)
+            : '#efe4c8'
         ctx.fillRect(x - 8, y - 8, plateW + 16, plateH + 16)
         ctx.restore()
 
@@ -805,7 +846,10 @@ export function paintPage(
           ctx.shadowColor = 'rgba(40,24,8,0.45)'
           ctx.shadowBlur = 18
           ctx.shadowOffsetY = 7
-          ctx.fillStyle = '#f4ecd8'
+          ctx.fillStyle =
+            opts.hoveredImage === src
+              ? mixInk('#f4ecd8', hoverInk, opts.imageHoverMix ?? 0)
+              : '#f4ecd8'
           ctx.fillRect(-w / 2 - border, -ph / 2 - border, w + border * 2, ph + border * 2)
           ctx.restore()
 
@@ -906,6 +950,52 @@ export function paintPage(
   ctx.fillText(folio, PAGE_W / 2, PAGE_H - 52)
   ctx.textAlign = 'left'
 
+  // A small double-arrow beside the folio jumps across the journal. It mirrors
+  // across the gutter: back-to-first sits to the left of the left folio, while
+  // forward-to-last sits to the right of the right folio. The first and last
+  // pages omit it entirely (the caller decides that with `jump`).
+  if (opts.jump) {
+    const first = opts.jump.kind === 'first'
+    const cx = PAGE_W / 2 + (first ? -116 : 116)
+    const cy = PAGE_H - 62
+    const w = 66
+    const h = 44
+    const hovered = opts.hoveredLink === opts.jump.to
+    const mix = hovered ? opts.linkHoverMix ?? 0 : 0
+    const glyph = mixInk(INK, hoverInk, mix)
+
+    ctx.save()
+    ctx.fillStyle = hovered ? mixInk('rgba(120, 80, 40)', hoverInk, mix * 0.55) : 'rgba(120,80,40,0.1)'
+    ctx.strokeStyle = hovered ? glyph : 'rgba(90,60,30,0.38)'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.roundRect(cx - w / 2, cy - h / 2, w, h, 8)
+    ctx.fill()
+    ctx.stroke()
+
+    const direction = first ? -1 : 1
+    ctx.fillStyle = glyph
+    for (const offset of [-9, 9]) {
+      const tipX = cx + offset + direction * 9
+      const baseX = cx + offset - direction * 8
+      ctx.beginPath()
+      ctx.moveTo(tipX, cy)
+      ctx.lineTo(baseX, cy - 10)
+      ctx.lineTo(baseX, cy + 10)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.restore()
+
+    hits.push({
+      to: opts.jump.to,
+      x0: (cx - w / 2 - 8) / PAGE_W,
+      y0: (cy - h / 2 - 8) / PAGE_H,
+      x1: (cx + w / 2 + 8) / PAGE_W,
+      y1: (cy + h / 2 + 8) / PAGE_H,
+    })
+  }
+
   // Page-turn control, inked in the outer bottom corner.
   //
   // This was a bare chevron in a thin circle, and nobody found it: at the read
@@ -984,44 +1074,17 @@ export function paintPage(
 
   return { hits, images, turn }
 }
-
-
-/** The camp's own mark: crossed logs under a flame. */
-function paintCampfireMark(ctx: CanvasRenderingContext2D, cx: number, cy: number, gold: string) {
-  ctx.save()
-  ctx.translate(cx, cy)
-  ctx.strokeStyle = gold
-  ctx.fillStyle = gold
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-
-  // Flame: two teardrops, the inner one open.
-  ctx.beginPath()
-  ctx.moveTo(0, -46)
-  ctx.bezierCurveTo(26, -18, 24, 2, 0, 14)
-  ctx.bezierCurveTo(-24, 2, -26, -18, 0, -46)
-  ctx.fill()
-
-  // Crossed logs.
-  ctx.lineWidth = 7
-  for (const d of [1, -1]) {
-    ctx.beginPath()
-    ctx.moveTo(-52 * d, 24)
-    ctx.lineTo(52 * d, 44)
-    ctx.stroke()
-  }
-  ctx.restore()
-}
-
-
-
 /**
- * The closed cover: a gilt title, stamped into the board, with the mark that
- * belongs to this binding above it.
+ * The closed cover: a restrained gilt title stamped into the board.
  *
  * The board itself already carries its inset double rule in its own texture
  * (see `makeLeatherMaps`), so nothing here draws a second border — that gave
  * the shut journal a grid of competing rectangles the first time round.
+ *
+ * The title block sits around the optical centre of the board. The former icon,
+ * underline, and volume code made the cover read like an interface card rather
+ * than a physical journal, so the shared design now keeps only the collection
+ * name and each tent's title.
  *
  * The gilt is two passes — a dark impression offset down and right, then the
  * bright metal over it — because that is what stamped foil looks like: the
@@ -1030,7 +1093,7 @@ function paintCampfireMark(ctx: CanvasRenderingContext2D, cx: number, cy: number
 export function paintCover(
   ctx: CanvasRenderingContext2D,
   title: string,
-  accent: string,
+  subtitle: string,
   binding: Binding = 'leather'
 ) {
   ctx.clearRect(0, 0, PAGE_W, PAGE_H)
@@ -1046,28 +1109,28 @@ export function paintCover(
     ctx.letterSpacing = '0px'
   }
 
-  /*
-    One binding, three colours.
+  const metal = binding === 'cloth' ? '#c8d7d2' : binding === 'copper' ? '#d3a457' : '#d9b875'
+  const titleMetal = binding === 'cloth' ? '#e7eee8' : '#f0d492'
+  const insetX = 56
+  const insetY = 68
 
-    The three journals used to be three different objects — a hide, a cloth
-    field book with metal corners and a treeline, and a patinated copper ledger
-    — and between the aurora mark, the forest silhouette and the corner plates
-    the two field bindings carried more furniture than a board this size can
-    hold. They are one book now: the same gold-ruled board, the same fire mark,
-    the same imprint, and only the leather's own colour telling the three
-    tents apart. `binding` is kept in the signature because the geometry still
-    threads it through; it no longer changes anything here.
-  */
-  void binding
-  void accent
+  // One coordinate system for every piece of cover furniture. Both frames are
+  // mathematically concentric and stay safely inside the front board.
+  ctx.save()
+  ctx.strokeStyle = metal
+  ctx.lineWidth = binding === 'cloth' ? 2.5 : 2
+  if (binding === 'cloth') ctx.setLineDash([8, 11])
+  ctx.strokeRect(insetX, insetY, PAGE_W - insetX * 2, PAGE_H - insetY * 2)
+  ctx.setLineDash([])
+  if (binding !== 'cloth') {
+    ctx.globalAlpha = 0.58
+    ctx.lineWidth = 1.2
+    ctx.strokeRect(insetX + 14, insetY + 14, PAGE_W - (insetX + 14) * 2, PAGE_H - (insetY + 14) * 2)
+  }
+  ctx.restore()
 
-  paintCampfireMark(ctx, PAGE_W / 2, PAGE_H * 0.29, '#d8b06a')
-  stamp('THE CAMP JOURNAL', `600 28px ${SANS}`, '8px', PAGE_H * 0.42, '#d8b06a')
-  // No rule under the title. It was a bright bar in the tent's own colour
-  // sitting directly under the one piece of gold on the board, and next to a
-  // stamped imprint a saturated line reads as a UI underline rather than as
-  // anything a bookbinder does.
-  stamp(title.toUpperCase(), `700 82px ${SERIF}`, '2px', PAGE_H * 0.54, '#f0d492')
+  stamp(subtitle.toUpperCase(), `700 38px ${SANS}`, '5px', PAGE_H * 0.43, metal)
+  stamp(title.toUpperCase(), `700 108px ${SERIF}`, '2px', PAGE_H * 0.57, titleMetal)
 
   ctx.textAlign = 'left'
 }

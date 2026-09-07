@@ -39,7 +39,7 @@ export const ALL_STANDARD_MATERIALS: THREE.MeshStandardMaterial[] = []
 export const TENT_MATERIALS: THREE.MeshStandardMaterial[] = []
 
 /** Guards the material-upgrade traversal in useKit() — see its comment. */
-let kitMaterialsUpgraded = false
+const upgradedKitScenes = new WeakSet<THREE.Object3D>()
 
 /**
  * Loader + helpers for the campsite kit.
@@ -55,12 +55,30 @@ let kitMaterialsUpgraded = false
  *   Backpack
  */
 
-export const KIT_URL = '/models/campsite-kit.glb'
+export const KIT_URL = '/models/campsite-kit.glb?v=2'
 
 export interface Part {
   geometry: THREE.BufferGeometry
   material: THREE.Material
 }
+
+interface PreparedKit {
+  scene: THREE.Group
+  get: (name: string) => THREE.Object3D | undefined
+  parts: (name: string) => Part[]
+  treeParts: (species: 'TreeA' | 'TreeB' | 'TreeC') => Part[]
+  grassParts: (name: 'GrassA' | 'GrassB') => Part[]
+}
+
+/**
+ * `useGLTF` shares one scene across every hook consumer. Keep the expensive
+ * preparation shared at the same lifetime too, while preserving a distinct
+ * anisotropy pass for a different renderer (whose capability limit can differ).
+ */
+const preparedKits = new WeakMap<
+  THREE.Group,
+  WeakMap<THREE.WebGLRenderer, PreparedKit>
+>()
 
 /** A glTF mesh with several primitives arrives as a Group of Meshes. */
 export function collectParts(node: THREE.Object3D | undefined): Part[] {
@@ -81,10 +99,17 @@ export function useKit() {
   const { gl } = useThree()
 
   return useMemo(() => {
+    let byRenderer = preparedKits.get(gltf.scene)
+    const cachedKit = byRenderer?.get(gl)
+    if (cachedKit) return cachedKit
+
+    if (!byRenderer) {
+      byRenderer = new WeakMap<THREE.WebGLRenderer, PreparedKit>()
+      preparedKits.set(gltf.scene, byRenderer)
+    }
+
     const byName = new Map<string, THREE.Object3D>()
     gltf.scene.traverse((o) => byName.set(o.name, o))
-
-    const part = (name: string) => collectParts(byName.get(name))
 
     /*
       Anisotropic filtering on every map the kit ships.
@@ -163,8 +188,8 @@ export function useKit() {
     // with this un-guarded, while the always-warm interactive dev tab
     // (already past that first commit before the bug was introduced)
     // never showed it — the tell that it was a first-mount-only problem.
-    if (!kitMaterialsUpgraded) {
-      kitMaterialsUpgraded = true
+    if (!upgradedKitScenes.has(gltf.scene)) {
+      upgradedKitScenes.add(gltf.scene)
       gltf.scene.traverse((o) => {
         const mesh = o as THREE.Mesh
         if (!mesh.isMesh) return
@@ -203,6 +228,15 @@ export function useKit() {
         })
         mesh.material = Array.isArray(mesh.material) ? upgraded : upgraded[0]
       })
+    }
+
+    const partCache = new Map<string, Part[]>()
+    const part = (name: string): Part[] => {
+      const cached = partCache.get(name)
+      if (cached) return cached
+      const parts = collectParts(byName.get(name))
+      partCache.set(name, parts)
+      return parts
     }
 
     // Foliage reads as cardboard without two-sided rendering, and the pack
@@ -278,6 +312,12 @@ export function useKit() {
           alphaTest: src.alphaTest,
           transparent: src.transparent,
           side: THREE.DoubleSide,
+          // Texture-masked sky floor. Thin blades frequently face away from
+          // both directionals; a very low cool emissive keeps their printed
+          // detail visible without turning the field into a self-lit carpet.
+          emissive: new THREE.Color('#31563a'),
+          emissiveMap: src.map,
+          emissiveIntensity: 1,
         })
         applyWind(m, {
           amplitude: 0.075,
@@ -304,10 +344,10 @@ export function useKit() {
             unlit half came out grey-green because there is nothing else out
             there to give it a hue.
           */
-          mapTint: new THREE.Color('#5ea23e'),
+          mapTint: new THREE.Color('#587f52'),
           // The soil end. Still the ambient occlusion under every tent, bench
           // and trunk that no shadow map at this scale can draw.
-          rootTint: new THREE.Color('#1c0d07'),
+          rootTint: new THREE.Color('#18261d'),
           // And the moonlit tips. Warm-dark rather than the old blue-green:
           // the far field in the reference is near-black with a red cast, not
           // a cool one, because nothing cold reaches the floor of a clearing.
@@ -317,8 +357,8 @@ export function useKit() {
           // the fire stopped reading as the thing lighting the field. The far
           // end of the ramp is a dark blue-green now; the warm terms below are
           // unchanged, so the pool round the fire is the only warm ground.
-          tipTint: new THREE.Color('#26382f'),
-          coolGain: 0.86,
+          tipTint: new THREE.Color('#50735b'),
+          coolGain: 1.02,
           // The fire and six torches are the only warm light in the clearing
           // and the field is what they are standing in; a camp whose grass does
           // not change colour toward the coals reads as a green carpet with
@@ -326,15 +366,15 @@ export function useKit() {
           // fire's point light is already lighting warm, so it stacks on top of
           // real firelight rather than replacing it — at 0.85 the two together
           // took the whole foreground to straw.
-          warmGain: 0.11,
+          warmGain: 0.065,
           // Redder than the old amber. The pool in the reference runs to
           // rgb(133,46,18) at its brightest — nearly two stops of red over
           // green — and an amber light on a rust field lands on orange, not on
           // that.
-          warmColor: new THREE.Color('#ff9a55'),
+          warmColor: new THREE.Color('#e88d48'),
           // The ramp between a blade at the treeline and a blade at the fire is
           // a colour ramp the whole way rather than a switch at the end of one.
-          warmTint: new THREE.Color('#f0a56e'),
+          warmTint: new THREE.Color('#b48a5b'),
         })
         // LIGHTING-REWORK (2026-08-17): live gain for the ?debug panel's
         // "Grass" slider, requested separately from the scene-wide
@@ -433,8 +473,8 @@ export function useKit() {
           // that wood is torchlight and the violet end of the display, not a
           // blue sky. A navy floor here is what made every tree read as a
           // cut-out against the aurora rather than as part of the same night.
-          emissive: new THREE.Color('#191a26'),
-          emissiveIntensity: 0.27,
+          emissive: new THREE.Color('#243d34'),
+          emissiveIntensity: 0.58,
           emissiveMap: src.map,
         })
         applyWind(m, {
@@ -465,9 +505,9 @@ export function useKit() {
           // A blade's radii, widened for something ten metres up and twenty
           // out: the fire reaches about twelve metres of wood, a torch about
           // seven.
-          warmReach: 2.3,
-          warmGain: 0.16,
-          warmColor: new THREE.Color('#ff8c3c'),
+          warmReach: 1.55,
+          warmGain: 0.08,
+          warmColor: new THREE.Color('#d88343'),
           // The curtain lighting the canopy. Base and span in world metres: the
           // kit's tree is 22 units tall and the scatter scales it to a third,
           // so a crown lands somewhere between five and twelve metres up. The
@@ -503,13 +543,15 @@ export function useKit() {
       return out
     }
 
-    return {
+    const prepared: PreparedKit = {
       scene: gltf.scene,
       get: (name: string) => byName.get(name),
       parts: part,
       treeParts,
       grassParts,
     }
+    byRenderer.set(gl, prepared)
+    return prepared
   }, [gltf, gl])
 }
 

@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { sfxBookClose, sfxBookOpen, sfxPageTurn } from '../../lib/audio'
-import { BOOK_TITLE, bookSpreads } from './bookContent'
+import { damp } from '../../lib/scroll'
+import { BOOK_COVER_SUBTITLE, BOOK_TITLE, bookSpreads } from './bookContent'
 import {
   PAGE_H,
   PAGE_W,
@@ -78,8 +79,8 @@ const FROZEN_TURN = devParam('turn')
 /**
  * Dev-only: `?spread=7` opens the journal on that leaf.
  *
- * The projects journal is sixteen spreads deep now. Turning to the tool pages a
- * corner at a time to look at one of them costs fifteen page-turn animations,
+ * The projects journal is twenty spreads deep now. Turning to the tool pages a
+ * corner at a time to look at one of them costs nineteen page-turn animations,
  * and the headless capture runs at about a frame a second.
  */
 const FROZEN_SPREAD = devParam('spread')
@@ -205,6 +206,8 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
   const uBow = { value: 0 }
   /** 1 while the sheet is lying on a block, 0 at the top of the swing. */
   const uRest = { value: 1 }
+  /** 0 on either block, 1 while the sheet is upright. Holds paper exposure. */
+  const uTurnLift = { value: 0 }
   /**
    * cos of the group's own rotation: +1 at the start of a turn, -1 at the end.
    *
@@ -232,8 +235,8 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
     // were lit by the candles *plus* that lift, so the leaf came off the block a
     // different colour from the page it had just been, which is most of what
     // made it read as a second object rather than as the page moving.
-    emissive: new THREE.Color('#3a3226'),
-    emissiveIntensity: 0.22,
+    emissive: new THREE.Color('#332c21'),
+    emissiveIntensity: 0.16,
     // The sheet lies flush on the block at both ends of the swing — it is the
     // top leaf of that block — so at rest it is coplanar with the printed face
     // and would z-fight it. Biasing the leaf toward the camera settles that
@@ -248,6 +251,7 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
     shader.uniforms.uLag = uLag
     shader.uniforms.uBow = uBow
     shader.uniforms.uRest = uRest
+    shader.uniforms.uTurnLift = uTurnLift
     shader.uniforms.uFlip = uFlip
     shader.uniforms.uDir = uDir
     shader.uniforms.uSpineOff = uSpineOff
@@ -270,6 +274,20 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
            float t = clamp( ( u - 0.86 ) / 0.14, 0.0, 1.0 );
            return ${BOW.toFixed(4)} * pow( max( u, 0.0 ), 1.6 )
                 - ${GUTTER_DIP.toFixed(4)} * ( t * t * ( 3.0 - 2.0 * t ) );
+         }
+
+         // d leafLift / d u. The turning sheet uses the same height profile as
+         // the stationary blocks, so its normal must use the same slope too.
+         // Rotating only the original flat normal made the leaf change shade
+         // the instant it lifted, even while its silhouette was still flush.
+         float leafLiftSlope( float u ) {
+           float safeU = max( u, 0.00001 );
+           float bowSlope = ${BOW.toFixed(4)} * 1.6 * pow( safeU, 0.6 );
+           float t = clamp( ( u - 0.86 ) / 0.14, 0.0, 1.0 );
+           float insideDip = step( 0.86, u ) * ( 1.0 - step( 1.0, u ) );
+           float dipSlope = -${GUTTER_DIP.toFixed(4)}
+             * ( 6.0 * t * ( 1.0 - t ) / 0.14 ) * insideDip;
+           return bowSlope + dipSlope;
          }`
       )
       .replace(
@@ -325,6 +343,10 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
          {
            float gx0 = position.x + uDir * uSpineOff;
            float s0 = clamp( ( abs( gx0 ) - ( uSpineOff - uHalfW * 0.5 ) ) / uHalfW, 0.0, 1.0 );
+           float dRestDs = -leafLiftSlope( 1.0 - s0 ) * uRest * uFlip;
+           float dBowDs = uBow * 3.14159265 * cos( 3.14159265 * s0 ) * ( 1.0 - uRest );
+           float dGyDx = ( dRestDs + dBowDs ) * uDir / uHalfW;
+           objectNormal = normalize( vec3( -dGyDx, 0.0, 1.0 ) );
            float phi0 = -uDir * uLag * pow( s0, 1.3 );
            float c0 = cos( phi0 );
            float sn0 = sin( phi0 );
@@ -336,7 +358,12 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
          }`
       )
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n uniform sampler2D uBack;`)
+      .replace(
+        '#include <common>',
+        `#include <common>
+         uniform sampler2D uBack;
+         uniform float uTurnLift;`
+      )
       .replace(
         '#include <map_fragment>',
         // Both canvases are declared sRGB, so the sampler decodes them on the
@@ -356,7 +383,25 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
       // on the candle side exactly where the page beneath it does not.
       .replace(
         '#include <opaque_fragment>',
-        `outgoingLight = outgoingLight / ( 1.0 + outgoingLight * 0.62 );
+        `/*
+           A vertical sheet faces away from both lanterns, so physically lit
+           StandardMaterial falls several stops below the flat page and then
+           snaps back on landing. Preserve the paper/ink ratio by blending
+           toward a neutral exposure of the exact sampled page only while it
+           is lifted. At both endpoints uTurnLift is zero, making the leaf and
+           stationary block use identical lighting again.
+         */
+         // Neutral paper exposure calibrated to the resting page. The former
+         // 1.62 multiplier was visibly brighter than the page block, so the
+         // first non-zero drag frame looked like a light had switched on.
+         vec3 stableLeaf = diffuseColor.rgb * 1.12;
+         // Keep the real lighting through the first part of the lift, then
+         // progressively stabilize it as the sheet turns away from the lamps.
+         // This preserves a continuous grab while still preventing the upright
+         // page from falling several stops into brown.
+         float exposureHold = smoothstep( 0.08, 0.72, uTurnLift );
+         outgoingLight = mix( outgoingLight, stableLeaf, exposureHold );
+         outgoingLight = outgoingLight / ( 1.0 + outgoingLight * 0.62 );
          #include <opaque_fragment>`
       )
   }
@@ -373,55 +418,13 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
       uLag.value = lag
       uBow.value = bow
       uRest.value = rest
+      uTurnLift.value = 1 - rest
       uFlip.value = flip
     },
   }
 }
 
 /* ------------------------------------------------------- page-surface marks */
-
-/**
- * The soft mask every mark drawn *on* the paper is cut with.
- *
- * A hard-edged rectangle of additive colour does not read as a highlight, it
- * reads as a coloured tile lying on the page — and next to type on a curving
- * sheet the join between the two shows. Two crossed gradients give a blob that
- * fades out on all four sides, which is what a highlighter leaves.
- */
-const markMask = /* @__PURE__ */ (() => {
-  if (typeof document === 'undefined') return null
-  const w = 128
-  const h = 64
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const ctx = c.getContext('2d')!
-  const across = ctx.createLinearGradient(0, 0, w, 0)
-  for (const [at, a] of [
-    [0, 0],
-    [0.12, 1],
-    [0.88, 1],
-    [1, 0],
-  ] as [number, number][]) {
-    across.addColorStop(at, `rgba(255,255,255,${a})`)
-  }
-  ctx.fillStyle = across
-  ctx.fillRect(0, 0, w, h)
-  ctx.globalCompositeOperation = 'destination-in'
-  const down = ctx.createLinearGradient(0, 0, 0, h)
-  for (const [at, a] of [
-    [0, 0],
-    [0.22, 1],
-    [0.78, 1],
-    [1, 0],
-  ] as [number, number][]) {
-    down.addColorStop(at, `rgba(255,255,255,${a})`)
-  }
-  ctx.fillStyle = down
-  ctx.fillRect(0, 0, w, h)
-  ctx.globalCompositeOperation = 'source-over'
-  return new THREE.CanvasTexture(c)
-})()
 
 /**
  * A patch of the printed surface, as geometry.
@@ -434,7 +437,12 @@ const markMask = /* @__PURE__ */ (() => {
  * makes the mark a copy of the surface it sits on, a few tenths of a millimetre
  * above it, so it stays whole however the paper bends.
  */
-function buildPagePatch(side: 'left' | 'right', rect: Rect, segments = 12) {
+function buildPagePatch(
+  side: 'left' | 'right',
+  rect: Rect,
+  segments = 12,
+  surfaceLift = 0.0004
+) {
   const half = 0.5 - PAGE_GUTTER
   const xa = (side === 'left' ? -0.5 : PAGE_GUTTER) + rect.x0 * half
   const xb = (side === 'left' ? -0.5 : PAGE_GUTTER) + rect.x1 * half
@@ -453,7 +461,7 @@ function buildPagePatch(side: 'left' | 'right', rect: Rect, segments = 12) {
     // hovering that far off the paper projects a few pixels away from the type
     // it is meant to be sitting on, which is why the page-turn highlight came
     // up offset from the words it was highlighting.
-    const y = pageTopY(side, x) + 0.0004
+    const y = pageTopY(side, x) + surfaceLift
     pos.push(x, y, za, x, y, zb)
     uv.push(t, 1, t, 0)
   }
@@ -468,6 +476,49 @@ function buildPagePatch(side: 'left' | 'right', rect: Rect, segments = 12) {
   g.setIndex(idx)
   g.computeVertexNormals()
   return g
+}
+
+type TurnMode = 'idle' | 'drag' | 'commit' | 'cancel'
+type TurnState = { t: number; dir: 1 | -1; to: number; mode: TurnMode }
+type PageDragState = {
+  pointerId: number
+  startX: number
+  dir: 1 | -1
+  to: number
+  started: boolean
+  /** Pointer-requested turn amount. The rendered leaf approaches this at a capped rate. */
+  target: number
+}
+type PageHoverTransition = {
+  key: string
+  side: 'left' | 'right'
+  mix: number
+  target: 0 | 1
+  painted: number
+}
+type PaintedPage = ReturnType<typeof paintPage>
+type PaintedSide = {
+  spread: number
+  identity: string
+  page: PaintedPage
+}
+
+const FULL_PAGE_RECT: Rect = { x0: 0.012, y0: 0.012, x1: 0.988, y1: 0.988 }
+
+/** Retain the first/last-page controls for later, but keep them out of the UI. */
+const BOOK_SKIP_CONTROLS_ENABLED = false
+
+/**
+ * Fast mice can cross the whole spread between two pointer events. Keep the
+ * physical leaf below this rate so high DPI changes distance, not animation
+ * duration. At 2.4 a fully dragged page remains visible for at least 417 ms.
+ */
+const MAX_DRAG_PROGRESS_PER_SECOND = 2.4
+
+/** Inverse of the quadratic turn ease, used to hand a dragged leaf to autoplay without a jump. */
+function inverseTurnEase(value: number) {
+  const y = THREE.MathUtils.clamp(value, 0, 1)
+  return y < 0.5 ? Math.sqrt(y / 2) : 1 - Math.sqrt((1 - y) / 2)
 }
 
 /** A canvas-backed texture that can be repainted in place. */
@@ -521,6 +572,11 @@ export interface BookProps {
   onZoom?: (src: string, from: PageScreenRect) => void
   /** Fired when the closed cover is clicked — arms `openRef` upstream. */
   onOpenRequest: () => void
+  /** The single upstream hover state shared by scale and outline selection. */
+  closedHot: boolean
+  onClosedHover: (index: number, hovered: boolean) => void
+  /** Exposes the front board mesh to the shared outline pass. */
+  registerOutlineTarget: (index: number, node: THREE.Object3D | null) => void
   /** Fired when "next" is clicked past the last spread, or "back" before the
       first — the edge pages double as the way to shut the journal. */
   onClose: () => void
@@ -538,6 +594,9 @@ export default function Book({
   onNavigate,
   onZoom,
   onOpenRequest,
+  closedHot,
+  onClosedHover,
+  registerOutlineTarget,
   onClose,
 }: BookProps) {
   /**
@@ -553,34 +612,53 @@ export default function Book({
   const getThree = useThree((s) => s.get)
 
   const spreads = useMemo(() => bookSpreads(index), [index])
+  const imageSources = useMemo(
+    () => [
+      ...new Set(spreads.flatMap((sp) => [...imagesIn(sp.left), ...imagesIn(sp.right)])),
+    ],
+    [spreads]
+  )
 
   // Clamped: the three journals are different lengths, and the parameter is
   // set once for all of them.
   const [spread, setSpread] = useState(
     FROZEN_SPREAD === null ? 0 : Math.max(0, Math.min(FROZEN_SPREAD, spreads.length - 1))
   )
-  const [hovered, setHovered] = useState<number | null>(null)
+  const hoveredLink = useRef<PageHoverTransition | null>(null)
+  const hoveredImage = useRef<PageHoverTransition | null>(null)
   const [hits, setHits] = useState<{ hit: Hit; side: 'left' | 'right' }[]>([])
-  const [turns, setTurns] = useState<{ rect: Rect; side: 'left' | 'right'; dir: 1 | -1 }[]>([])
   const [plates, setPlates] = useState<{ hit: ImageHit; side: 'left' | 'right' }[]>([])
-  const [platePressed, setPlatePressed] = useState<number | null>(null)
   /** Links and corner tabs only exist once the book is properly open. */
   const [armed, setArmed] = useState(false)
 
   const hinge = useRef<THREE.Group>(null)
   const shift = useRef<THREE.Group>(null)
+  const hoverScale = useRef<THREE.Group>(null)
   const spine = useRef<THREE.Group>(null)
   const leaf = useRef<THREE.Group>(null)
   const leafMesh = useRef<THREE.Mesh>(null)
   /** The page blocks. Measured on screen when something opens out of a page. */
   const rightPage = useRef<THREE.Mesh>(null)
   const leftPage = useRef<THREE.Mesh>(null)
-  const turn = useRef({ t: 1, dir: 1 as 1 | -1, to: 0 })
+  const turn = useRef<TurnState>({ t: 1, dir: 1, to: 0, mode: 'idle' })
+  const pageDrag = useRef<PageDragState | null>(null)
+  /** While a held drag is exactly flat, draw the stationary page block instead
+      of a visually similar second material laid over it. */
+  const dragEndpoint = useRef<'start' | 'end' | null>(null)
   const reveal = useRef(0)
+  /** True only after an inactive journal has had one full frame applied in its
+      final closed pose. The next frames can leave those invariant transforms
+      alone while retaining the candle-driven material response. */
+  const inactiveSettled = useRef(false)
   /** This frame's `open`, mirrored for the cover's click handler — an event
       callback closes over stale state otherwise, and `open` itself only
       exists inside the animation frame below. */
   const openLevel = useRef(0)
+  const closedHovered = useRef(false)
+  const setFrontCover = useCallback(
+    (node: THREE.Mesh | null) => registerOutlineTarget(index, node),
+    [index, registerOutlineTarget]
+  )
 
   /* ------------------------------------------------------------- geometry */
 
@@ -628,8 +706,15 @@ export default function Book({
       new THREE.MeshStandardMaterial({
         map: leather.map,
         normalMap: leather.normalMap,
-        normalScale: new THREE.Vector2(0.8, 0.8),
-        roughness: 0.62,
+        // Fine grain, felt rather than seen: the relief carries the pit
+        // pattern and nothing else, so the board takes a broad soft highlight
+        // instead of a field of glints.
+        normalScale: new THREE.Vector2(0.72, 0.72),
+        // Leather, not book cloth and certainly not lacquer. High enough that
+        // the candles spread across the board as one wide sheen rather than
+        // striking a hot spot on it, and metalness stays at zero — a dyed hide
+        // has no specular colour of its own.
+        roughness: 0.82,
         metalness: 0,
       }),
     [leather]
@@ -699,6 +784,23 @@ export default function Book({
 
   useEffect(
     () => () => {
+      for (const page of [
+        leftPaper,
+        rightPaper,
+        leftInk,
+        rightInk,
+        leafFront,
+        leafBack,
+        coverPage,
+      ]) {
+        page.tex.dispose()
+      }
+    },
+    [leftPaper, rightPaper, leftInk, rightInk, leafFront, leafBack, coverPage]
+  )
+
+  useEffect(
+    () => () => {
       for (const m of [
         coverMat,
         edgeMat,
@@ -716,33 +818,55 @@ export default function Book({
   /* -------------------------------------------------------------- content */
 
   const folio = (n: number) => `${n} / ${spreads.length * 2}`
+  // Projects uses a brighter muted cyan-teal than the tent fabric. It remains
+  // comfortably darker than true cyan, but no longer disappears into the aged
+  // paper on headers, link/image highlights, and tool-page accents.
+  const hoverColor = index === 2 ? '#3b8f91' : undefined
+  const accentLuma = index === 2 ? 0.43 : undefined
+  /** Distinguishes canvases painted for a prior prop identity even when the
+      numerical spread happens to be the same. */
+  const paintIdentity = `${index}\u0000${accent}`
 
-  // Both arrows always paint, on every spread. At the edges the arrow they
-  // draw is the only one left to press — `go` below turns it into "shut the
-  // book" instead of a page turn once there's nowhere further to go.
+  // Page turns are handled by the whole sheet, so the old printed "Back" and
+  // "Next page" controls are deliberately omitted. The folios remain.
   const drawLeft = (ctx: CanvasRenderingContext2D, i: number, paper = false) =>
     paintPage(ctx, spreads[i].left, {
       side: 'left',
       accent,
+      hoveredLink: hoveredLink.current?.side === 'left' ? hoveredLink.current.key : null,
+      hoveredImage: hoveredImage.current?.side === 'left' ? hoveredImage.current.key : null,
+      linkHoverMix: hoveredLink.current?.side === 'left' ? hoveredLink.current.mix : 0,
+      imageHoverMix: hoveredImage.current?.side === 'left' ? hoveredImage.current.mix : 0,
+      hoverColor,
+      accentLuma,
       folio: folio(i * 2 + 1),
+      jump:
+        BOOK_SKIP_CONTROLS_ENABLED && i > 0
+          ? { kind: 'first', to: 'book:0' }
+          : undefined,
       seed: 101 + i * 7 + index * 31,
       paper,
       paperSeed: paperSeed.left,
-      // A one-spread journal has nowhere to turn to, but it still needs a way
-      // to be shut — and the corner plate is the only control printed on the
-      // page. `go` turns it into "close" once there is nothing past it.
-      arrow: i > 0 || spreads.length === 1 ? 'prev' : undefined,
     })
 
   const drawRight = (ctx: CanvasRenderingContext2D, i: number, paper = false) =>
     paintPage(ctx, spreads[i].right, {
       side: 'right',
       accent,
+      hoveredLink: hoveredLink.current?.side === 'right' ? hoveredLink.current.key : null,
+      hoveredImage: hoveredImage.current?.side === 'right' ? hoveredImage.current.key : null,
+      linkHoverMix: hoveredLink.current?.side === 'right' ? hoveredLink.current.mix : 0,
+      imageHoverMix: hoveredImage.current?.side === 'right' ? hoveredImage.current.mix : 0,
+      hoverColor,
+      accentLuma,
       folio: folio(i * 2 + 2),
+      jump:
+        BOOK_SKIP_CONTROLS_ENABLED && i < spreads.length - 1
+          ? { kind: 'last', to: `book:${spreads.length - 1}` }
+          : undefined,
       seed: 202 + i * 13 + index * 17,
       paper,
       paperSeed: paperSeed.right,
-      arrow: i < spreads.length - 1 ? 'next' : undefined,
     })
 
   /**
@@ -755,35 +879,108 @@ export default function Book({
    * because it changes inside an animation.
    */
   const shown = useRef({ left: 0, right: 0 })
+  /** What is already resident in each stationary ink canvas. Page turns paint
+      the destination before it is exposed, so the following React commit can
+      republish its hit targets without drawing the same megapixel canvases a
+      second time. */
+  const painted = useRef<{ left: PaintedSide | null; right: PaintedSide | null }>({
+    left: null,
+    right: null,
+  })
 
   /** Redraws one half from `shown`, and returns what the painter found on it. */
   const paintSide = (side: 'left' | 'right') => {
     if (side === 'left') {
       const l = drawLeft(leftInk.ctx, shown.current.left)
       leftInk.tex.needsUpdate = true
+      painted.current.left = {
+        spread: shown.current.left,
+        identity: paintIdentity,
+        page: l,
+      }
       return l
     }
     const r = drawRight(rightInk.ctx, shown.current.right)
     rightInk.tex.needsUpdate = true
+    painted.current.right = {
+      spread: shown.current.right,
+      identity: paintIdentity,
+      page: r,
+    }
     return r
   }
 
-  /** Repaints both visible pages and republishes the click targets. */
-  const repaint = () => {
-    const l = paintSide('left')
-    const r = paintSide('right')
+  /** Republishes controls from the pixels already painted into both blocks. */
+  const publishPainted = () => {
+    const l = painted.current.left?.page
+    const r = painted.current.right?.page
+    if (!l || !r) return false
     setHits([
       ...l.hits.map((hit) => ({ hit, side: 'left' as const })),
       ...r.hits.map((hit) => ({ hit, side: 'right' as const })),
-    ])
-    setTurns([
-      ...(l.turn ? [{ rect: l.turn, side: 'left' as const, dir: -1 as const }] : []),
-      ...(r.turn ? [{ rect: r.turn, side: 'right' as const, dir: 1 as const }] : []),
     ])
     setPlates([
       ...l.images.map((hit) => ({ hit, side: 'left' as const })),
       ...r.images.map((hit) => ({ hit, side: 'right' as const })),
     ])
+    return true
+  }
+
+  /** Repaints both visible pages and republishes the click targets. */
+  const repaint = () => {
+    paintSide('left')
+    paintSide('right')
+    publishPainted()
+  }
+
+  const setLinkHover = (hit: Hit, side: 'left' | 'right') => {
+    const previous = hoveredLink.current
+    if (previous?.key === hit.to && previous.side === side) {
+      previous.target = 1
+      return
+    }
+    hoveredLink.current = { key: hit.to, side, mix: 0, target: 1, painted: -1 }
+    if (previous) paintSide(previous.side)
+  }
+
+  const clearLinkHover = (hit: Hit, side: 'left' | 'right') => {
+    const current = hoveredLink.current
+    if (!current || current.key !== hit.to || current.side !== side) return
+    current.target = 0
+  }
+
+  const setImageHover = (hit: ImageHit, side: 'left' | 'right') => {
+    const previous = hoveredImage.current
+    if (previous?.key === hit.src && previous.side === side) {
+      previous.target = 1
+      return
+    }
+    hoveredImage.current = { key: hit.src, side, mix: 0, target: 1, painted: -1 }
+    if (previous) paintSide(previous.side)
+  }
+
+  const clearImageHover = (hit: ImageHit, side: 'left' | 'right') => {
+    const current = hoveredImage.current
+    if (!current || current.key !== hit.src || current.side !== side) return
+    current.target = 0
+  }
+
+  /** Advances one canvas-backed hover without allocating a temporary array in
+      every frame of every mounted journal. */
+  const advancePageHover = (
+    hoverRef: { current: PageHoverTransition | null },
+    dt: number
+  ) => {
+    const hover = hoverRef.current
+    if (!hover) return
+    hover.mix = THREE.MathUtils.lerp(hover.mix, hover.target, damp(hover.target ? 16 : 12, dt))
+    const settled = Math.abs(hover.mix - hover.target) < 0.008
+    if (Math.abs(hover.mix - hover.painted) >= 0.055 || settled) {
+      hover.mix = settled ? hover.target : hover.mix
+      hover.painted = hover.mix
+      paintSide(hover.side)
+    }
+    if (hover.target === 0 && settled) hoverRef.current = null
   }
 
   useLayoutEffect(() => {
@@ -802,11 +999,39 @@ export default function Book({
     }
 
     // The paper itself is painted with its canvas, above; this only has to put
-    // the writing on it.
+    // the writing on it. A completed turn has already painted both destination
+    // halves before it commits `spread`, so reuse those exact pixels and only
+    // republish their controls. Initialisation, a prop identity change, and the
+    // put-away reset still take the full paint path.
     shown.current = { left: spread, right: spread }
-    repaint()
-    paintCover(coverPage.ctx, BOOK_TITLE[index] ?? 'Journal', accent, binding)
+    const left = painted.current.left
+    const right = painted.current.right
+    if (
+      left?.spread === spread &&
+      right?.spread === spread &&
+      left.identity === paintIdentity &&
+      right.identity === paintIdentity
+    ) {
+      publishPainted()
+    } else {
+      repaint()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spread, index, accent])
+
+  // The cover does not depend on the open spread. Paint it once before the
+  // first frame, then once more when its web fonts have actually landed.
+  useLayoutEffect(() => {
+    paintCover(
+      coverPage.ctx,
+      BOOK_TITLE[index] ?? 'Journal',
+      BOOK_COVER_SUBTITLE[index] ?? 'FIELD NOTES',
+      binding
+    )
     coverPage.tex.needsUpdate = true
+  }, [binding, coverPage, index])
+
+  useLayoutEffect(() => {
     // Web fonts land after the first paint, so repaint once when they arrive
     // rather than blocking the whole scene on document.fonts.
     //
@@ -821,18 +1046,17 @@ export default function Book({
     // in the book is fetched at once rather than only the open one, so turning
     // a page does not land on an empty plate.
     let alive = true
-    const srcs = spreads.flatMap((sp) => [...imagesIn(sp.left), ...imagesIn(sp.right)])
-    if (srcs.length > 0) {
+    if (imageSources.length > 0) {
       // Repainted per print rather than once at the end: the open spread's
       // picture is usually the first or second to land, and waiting on the
       // other seventeen before putting it up is a plate that stays empty for
       // several seconds while the reader looks straight at it.
-      preloadBookImages(srcs, (src) => {
+      preloadBookImages(imageSources, (src) => {
         if (!alive) return
-        const shownNow = [spreads[shown.current.left]?.left, spreads[shown.current.right]?.right]
-        if (!shownNow.some((page) => page && imagesIn(page).includes(src))) return
-        paintSide('left')
-        paintSide('right')
+        const leftShown = spreads[shown.current.left]?.left
+        const rightShown = spreads[shown.current.right]?.right
+        if (leftShown && imagesIn(leftShown).includes(src)) paintSide('left')
+        if (rightShown && imagesIn(rightShown).includes(src)) paintSide('right')
       }).then(() => {
         // Backstop. Every per-print repaint above is conditional on the print
         // belonging to a page that is open *at that moment*, and a source that
@@ -848,14 +1072,41 @@ export default function Book({
       if (!alive) return
       paintSide('left')
       paintSide('right')
-      paintCover(coverPage.ctx, BOOK_TITLE[index] ?? 'Journal', accent, binding)
+      paintCover(
+        coverPage.ctx,
+        BOOK_TITLE[index] ?? 'Journal',
+        BOOK_COVER_SUBTITLE[index] ?? 'FIELD NOTES',
+        binding
+      )
       coverPage.tex.needsUpdate = true
     })
     return () => {
       alive = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spread, index, accent])
+  }, [imageSources, index, accent, binding])
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    return () => {
+      const w = window as unknown as {
+        __bookSpreads?: unknown[]
+        __books?: unknown[]
+        __bookTurns?: unknown[]
+        __bookHitRects?: unknown[]
+        __bookHoverScale?: unknown[]
+      }
+      for (const entries of [
+        w.__bookSpreads,
+        w.__books,
+        w.__bookTurns,
+        w.__bookHitRects,
+        w.__bookHoverScale,
+      ]) {
+        if (entries) delete entries[index]
+      }
+    }
+  }, [index])
 
   // Reset only when the camera moves to a different tent's journal. Keyed on
   // `live` instead, leaving a tent wiped the ink the instant Escape was pressed
@@ -873,7 +1124,9 @@ export default function Book({
     if (FROZEN_SPREAD === null) {
       setSpread(0)
       shown.current = { left: 0, right: 0 }
-      turn.current = { t: 1, dir: 1, to: 0 }
+      turn.current = { t: 1, dir: 1, to: 0, mode: 'idle' }
+      pageDrag.current = null
+      dragEndpoint.current = null
     }
   }, [enabled])
 
@@ -883,6 +1136,33 @@ export default function Book({
   useEffect(() => {
     if (!live && openLevel.current > 0.05) sfxBookClose()
   }, [live])
+
+  useEffect(() => {
+    if (!enabled) {
+      closedHovered.current = false
+      onClosedHover(index, false)
+    }
+  }, [enabled, index, onClosedHover])
+
+  const clearClosedHover = useCallback(() => {
+    if (!closedHovered.current) return
+    closedHovered.current = false
+    document.body.classList.remove('camp-hover')
+    onClosedHover(index, false)
+  }, [index, onClosedHover])
+
+  // Pointer-out can be missed when the canvas loses focus or the cover moves
+  // under a stationary pointer during its hover scale. Clear ownership at the
+  // DOM boundary as a final backstop, so neither scale nor outline can stick.
+  useEffect(() => {
+    const canvas = getThree().gl.domElement
+    canvas.addEventListener('pointerleave', clearClosedHover)
+    window.addEventListener('blur', clearClosedHover)
+    return () => {
+      canvas.removeEventListener('pointerleave', clearClosedHover)
+      window.removeEventListener('blur', clearClosedHover)
+    }
+  }, [clearClosedHover, getThree])
 
   /**
    * Turns a leaf. The sheet carries the outgoing page on its front and the
@@ -977,17 +1257,47 @@ export default function Book({
 
   const go = (dir: 1 | -1) => goTo(spread + dir, dir)
 
+  /** Paints both faces and exposes the turning leaf, without choosing how it moves. */
+  const stageTurn = (to: number, dir: 1 | -1, mode: 'drag' | 'commit') => {
+    if (turn.current.mode !== 'idle' || to < 0 || to >= spreads.length || to === spread) {
+      return false
+    }
+
+    hoveredLink.current = null
+    hoveredImage.current = null
+
+    if (dir === 1) {
+      drawRight(leafFront.ctx, spread, true)
+      drawLeft(leafBack.ctx, to, true)
+      shown.current.right = to
+      paintSide('right')
+    } else {
+      drawLeft(leafFront.ctx, spread, true)
+      drawRight(leafBack.ctx, to, true)
+      shown.current.left = to
+      paintSide('left')
+    }
+    leafFront.tex.needsUpdate = true
+    leafBack.tex.needsUpdate = true
+    turn.current = { t: 0, dir, to, mode }
+    dragEndpoint.current = null
+    setHits([])
+    setPlates([])
+    sfxPageTurn()
+    return true
+  }
+
   /**
    * Turns to a named spread. The contents page jumps several at once; the
-   * corner controls step by one. Either way a single sheet swings, carrying the
+   * full-page gesture steps by one. Either way a single sheet swings, carrying the
    * page being left on its front and the page being arrived at on its back —
    * turning eleven leaves one at a time to reach chapter eleven would be
    * honest and unwatchable.
    */
   const goTo = (to: number, dir: 1 | -1) => {
-    if (turn.current.t < 1) return
-    // Off either end of the deck — "Back" on the first spread, "Next page" on
-    // the last. There's nowhere left to turn to, so the same control shuts
+    if (turn.current.mode !== 'idle') return
+    // Off either end of the deck — left page on the first spread, right page on
+    // the last. There's nowhere left to turn to, so that page gesture shuts
     // the journal instead of doing nothing.
     if (to < 0 || to >= spreads.length) {
       sfxBookClose()
@@ -1007,23 +1317,65 @@ export default function Book({
     // which is exactly what makes a turn read as a texture swap rather than as
     // paper. The half the sheet is landing *on* keeps its old page until the
     // sheet covers it — the sheet's own back face is what replaces it.
-    if (dir === 1) {
-      drawRight(leafFront.ctx, spread, true)
-      drawLeft(leafBack.ctx, to, true)
-      shown.current.right = to
-      paintSide('right')
-    } else {
-      drawLeft(leafFront.ctx, spread, true)
-      drawRight(leafBack.ctx, to, true)
-      shown.current.left = to
-      paintSide('left')
+    stageTurn(to, dir, 'commit')
+  }
+
+  const pointerX = (event: ThreeEvent<PointerEvent>) => event.nativeEvent.clientX
+
+  const beginPageGesture = (side: 'left' | 'right', event: ThreeEvent<PointerEvent>) => {
+    if (!armed || turn.current.mode !== 'idle') return
+    event.stopPropagation()
+    ;(event.target as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture(
+      event.pointerId
+    )
+    const dir: 1 | -1 = side === 'right' ? 1 : -1
+    pageDrag.current = {
+      pointerId: event.pointerId,
+      startX: pointerX(event),
+      dir,
+      to: spread + dir,
+      started: false,
+      target: 0,
     }
-    leafFront.tex.needsUpdate = true
-    leafBack.tex.needsUpdate = true
-    turn.current = { t: 0, dir, to }
-    setHits([])
-    setPlates([])
-    sfxPageTurn()
+  }
+
+  const movePageGesture = (event: ThreeEvent<PointerEvent>) => {
+    const drag = pageDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.stopPropagation()
+    const dx = pointerX(event) - drag.startX
+    if (!drag.started && Math.abs(dx) >= 4) {
+      drag.started = stageTurn(drag.to, drag.dir, 'drag')
+    }
+    if (!drag.started) return
+
+    const span = Math.max(180, getThree().size.width * 0.28)
+    drag.target = THREE.MathUtils.clamp((drag.dir === 1 ? -dx : dx) / span, 0, 1)
+  }
+
+  const endPageGesture = (event: ThreeEvent<PointerEvent>, cancelled = false) => {
+    const drag = pageDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.stopPropagation()
+    ;(
+      event.target as unknown as { releasePointerCapture: (id: number) => void }
+    ).releasePointerCapture(event.pointerId)
+    pageDrag.current = null
+
+    if (!drag.started) {
+      if (!cancelled) go(drag.dir)
+      return
+    }
+
+    if (!cancelled && drag.target >= 0.28) {
+      // Commit from the leaf's visible position, not the potentially distant
+      // pointer target. A one-frame high-DPI swipe therefore finishes as a
+      // readable authored turn instead of teleporting to the far block.
+      turn.current.t = inverseTurnEase(turn.current.t)
+      turn.current.mode = 'commit'
+    } else {
+      turn.current.mode = 'cancel'
+    }
   }
 
   // Dev only — see FROZEN_TURN.
@@ -1090,12 +1442,58 @@ export default function Book({
 
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05)
+    const tu = turn.current
+
+    if (
+      !import.meta.env.DEV &&
+      inactiveSettled.current &&
+      !enabled &&
+      !live &&
+      !closedHot &&
+      !closedHovered.current &&
+      !armed &&
+      reveal.current === 0 &&
+      openLevel.current === 0 &&
+      tu.mode === 'idle' &&
+      pageDrag.current === null &&
+      hoveredLink.current === null &&
+      hoveredImage.current === null &&
+      leaf.current?.visible === false &&
+      Math.abs((hoverScale.current?.scale.x ?? width) / width - 1) < 1e-8
+    ) {
+      return
+    }
+    inactiveSettled.current = false
+
+    // The page breathes with the candles while any page surface can be seen.
+    // A journal admitted by the fast path above is fully shut and inactive, so
+    // all three of these materials are hidden by the cover; when it becomes
+    // active again this value is refreshed before the next render.
     const t = state.clock.elapsedTime
+    const lamp = 0.93 + Math.sin(t * 3.1) * 0.05 + Math.sin(t * 7.7) * 0.025
+    leftMat.material.emissiveIntensity = 0.16 * lamp
+    rightMat.material.emissiveIntensity = 0.16 * lamp
+    if (tu.mode === 'idle') leafMat.material.emissiveIntensity = 0.16 * lamp
+
+    // Canvas ink cannot be tweened by CSS. Advance a small, quantized blend and
+    // repaint only when it changes enough to be visible; this gives links and
+    // photo mounts a smooth response without uploading a 796x1280 texture on
+    // every high-refresh frame.
+    advancePageHover(hoveredLink, dt)
+    advancePageHover(hoveredImage, dt)
 
     // Opening: eased, with a little overshoot past flat — a stiff cover drops.
     const open = enabled ? openRef.current : 0
     openLevel.current = open
     const k = THREE.MathUtils.clamp(open, 0, 1)
+    if (hoverScale.current) {
+      // Scale and outline both receive `closedHot` from the same parent state,
+      // so neither can lead or linger after the other.
+      const target = closedHot && enabled && k < 0.05 ? 1.035 : 1
+      const current = hoverScale.current.scale.x / width
+      const next = THREE.MathUtils.lerp(current, target, damp(12, delta)) * width
+      hoverScale.current.scale.setScalar(next)
+    }
     const eased = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2
     const overshoot = Math.sin(Math.PI * Math.min(1, k * 1.2)) * 0.13 * (1 - k)
     if (hinge.current) {
@@ -1166,22 +1564,32 @@ export default function Book({
     leftMat.setReveal(rv)
     rightMat.setReveal(rv)
 
-    // Candles are doing the lighting, so the page breathes with them.
-    const lamp = 0.93 + Math.sin(t * 3.1) * 0.05 + Math.sin(t * 7.7) * 0.025
-    // 0.16, down from 0.22: with the paper itself taken a step off white the
-    // self-illumination was the rest of the glare.
-    leftMat.material.emissiveIntensity = 0.16 * lamp
-    rightMat.material.emissiveIntensity = 0.16 * lamp
-
-    const tu = turn.current
-    if (tu.t >= 1) leafMat.material.emissiveIntensity = 0.16 * lamp
-    if (tu.t < 1) {
+    if (tu.mode !== 'idle') {
       // Slower than it was. A page takes the better part of a second to fall
       // over, and at 0.54s the sheet crossed the spread faster than the eye
       // could read what was written on it.
-      tu.t = Math.min(1, tu.t + dt * 1.15)
-      if (FROZEN_TURN !== null) tu.t = FROZEN_TURN
-      const e = tu.t < 0.5 ? 2 * tu.t * tu.t : 1 - Math.pow(-2 * tu.t + 2, 2) / 2
+      if (tu.mode === 'drag') {
+        const drag = pageDrag.current
+        if (drag) {
+          const maxStep = MAX_DRAG_PROGRESS_PER_SECOND * dt
+          tu.t += THREE.MathUtils.clamp(drag.target - tu.t, -maxStep, maxStep)
+          tu.t = THREE.MathUtils.clamp(tu.t, 0, 1)
+        }
+      } else if (tu.mode === 'commit') {
+        tu.t = Math.min(1, tu.t + dt * 1.15)
+        if (FROZEN_TURN !== null) tu.t = FROZEN_TURN
+      } else if (tu.mode === 'cancel') {
+        tu.t = Math.max(0, tu.t - dt * 2.8)
+      }
+      // During a drag, progress chases the pointer linearly at the capped rate.
+      // Autoplay retains the authored quadratic ease; release converts through
+      // inverseTurnEase, so taking over never jumps.
+      const e =
+        tu.mode === 'drag' || tu.mode === 'cancel'
+          ? tu.t
+          : tu.t < 0.5
+            ? 2 * tu.t * tu.t
+            : 1 - Math.pow(-2 * tu.t + 2, 2) / 2
       /*
         The swing, brought down flat slightly early.
 
@@ -1217,28 +1625,57 @@ export default function Book({
       // has turned is a fore edge *below* the block it is lying on, and it
       // clips straight through the paper.
       const swing = Math.sin(Math.PI * er)
-      /*
-        Keep the sheet's value while it is up.
-
-        The candles are two point sources sitting either side of a flat book, so
-        a page standing on edge halfway through a turn faces neither of them and
-        goes almost black — which the reader sees as the writing being switched
-        off for the length of the animation and back on when it lands. Physically
-        right, and wrong for a page you are meant to be reading.
-
-        Lifting the sheet's self-illumination with the swing holds its value
-        through the vertical part and returns it to the blocks' own 0.16 at both
-        ends, so the turn is a page moving rather than a page dimming. It keys to
-        the sampled paper (see makeLeafMaterial), so the ink stays ink and the
-        Reinhard shoulder still caps it.
-      */
-      leafMat.material.emissiveIntensity = (0.16 + 0.62 * swing) * lamp
+      // Match the stationary blocks exactly. The shader's neutral exposure hold
+      // handles the upright interval; increasing this warm emissive term during
+      // the turn is what made the sheet become brown before snapping cream on
+      // landing.
+      leafMat.material.emissiveIntensity = 0.16 * lamp
       const lag = Math.min(0.55 * swing, Math.PI * er * 0.7, Math.PI * (1 - er) * 0.7)
       // The last argument turns the rest profile the right way up once the sheet
       // has gone over the top. See uFlip.
       leafMat.setFlex(lag, 0.055 * swing, 1 - swing, Math.cos(Math.PI * er))
+
+      /*
+        At a held endpoint the leaf and the page block occupy the same visible
+        place, but they cannot be pixel-identical: the leaf is double-sided,
+        bends in a shader, and selects its front/back canvas per fragment. Even
+        with matched lights that left small differences in image contrast, ink,
+        and the fore edge.
+
+        Use the actual stationary block while the drag is exactly flat. The
+        hidden page is restored/staged as the pointer enters or leaves an
+        endpoint, so motion remains continuous while the two resting frames are
+        now literally the same material and geometry as the idle book.
+      */
+      const endpoint =
+        tu.mode === 'drag' ? (er <= 0.001 ? 'start' : er >= 0.999 ? 'end' : null) : null
+      if (endpoint !== dragEndpoint.current) {
+        const source = tu.dir === 1 ? 'right' : 'left'
+        const landing = tu.dir === 1 ? 'left' : 'right'
+        if (endpoint === 'start') {
+          if (shown.current[source] !== spread) {
+            shown.current[source] = spread
+            paintSide(source)
+          }
+        } else if (endpoint === 'end') {
+          if (shown.current[landing] !== tu.to) {
+            shown.current[landing] = tu.to
+            paintSide(landing)
+          }
+        } else if (tu.mode === 'drag') {
+          if (shown.current[source] !== tu.to) {
+            shown.current[source] = tu.to
+            paintSide(source)
+          }
+          if (shown.current[landing] !== spread) {
+            shown.current[landing] = spread
+            paintSide(landing)
+          }
+        }
+        dragEndpoint.current = endpoint
+      }
       if (leaf.current) {
-        leaf.current.visible = true
+        leaf.current.visible = endpoint === null
         leaf.current.rotation.z = tu.dir * Math.PI * er
         // Off the block only while it is in the air. See LEAF_CLEARANCE.
         leaf.current.position.y = LEAF_Y + LEAF_CLEARANCE * swing
@@ -1263,20 +1700,32 @@ export default function Book({
         matches it, and there is nothing left to change when the sheet goes.
       */
       const landing = tu.dir === 1 ? 'left' : 'right'
-      if (er >= 0.93 && shown.current[landing] !== tu.to) {
+      if (tu.mode === 'commit' && er >= 0.93 && shown.current[landing] !== tu.to) {
         shown.current[landing] = tu.to
         paintSide(landing)
       }
       // By here the sheet has been lying flush on the block, carrying the same
       // page as the block, for the tail of the ease — so this hides nothing the
       // reader can see going.
-      if (tu.t >= 1) {
+      if (tu.mode === 'commit' && tu.t >= 1) {
         if (shown.current[landing] !== tu.to) {
           shown.current[landing] = tu.to
           paintSide(landing)
         }
         if (leaf.current) leaf.current.visible = false
+        tu.mode = 'idle'
+        dragEndpoint.current = null
         setSpread(tu.to)
+      } else if (tu.mode === 'cancel' && tu.t <= 0) {
+        // Put both blocks back exactly as they were before the tentative drag.
+        // The lifted sheet was only a preview; cancelling must not mutate the
+        // spread or leave its hidden under-page staged for the next gesture.
+        shown.current = { left: spread, right: spread }
+        repaint()
+        if (leaf.current) leaf.current.visible = false
+        tu.t = 1
+        tu.mode = 'idle'
+        dragEndpoint.current = null
       }
     }
 
@@ -1284,18 +1733,52 @@ export default function Book({
     // same place in three tents, and a framing difference between them is only
     // separable from a camera difference by reading both. See tools/qa/cam.mjs.
     if (import.meta.env.DEV && shift.current) {
-      const w = window as unknown as { __books?: unknown[] }
+      const w = window as unknown as {
+        __books?: unknown[]
+        __bookTurns?: unknown[]
+        __bookHitRects?: unknown[][]
+        __bookHoverScale?: number[]
+      }
       ;(w.__books ??= [])[index] = {
         pos: shift.current.getWorldPosition(new THREE.Vector3()).toArray(),
         local: shift.current.position.toArray(),
         parent: shift.current.parent?.getWorldPosition(new THREE.Vector3()).toArray(),
         scale: shift.current.getWorldScale(new THREE.Vector3()).toArray(),
       }
+      ;(w.__bookTurns ??= [])[index] = { ...tu }
+      ;(w.__bookHoverScale ??= [])[index] = hoverScale.current
+        ? hoverScale.current.scale.x / width
+        : 1
+      ;(w.__bookHitRects ??= [])[index] = hits.map(({ hit, side }) => ({
+        to: hit.to,
+        side,
+        screen: pageScreenRect(side, hit),
+      }))
     }
 
     // One state change per open and per close, rather than one a frame.
-    const wantArmed = live && open > 0.9 && tu.t >= 1
+    const wantArmed = live && open > 0.9 && tu.mode === 'idle'
     if (wantArmed !== armed) setArmed(wantArmed)
+
+    // `enabled` is dropped only once the cover has finished shutting. Record
+    // that this full frame applied the final pose; subsequent production frames
+    // can skip the invariant easing, transforms, reveal uniforms and arming
+    // checks until any input becomes active again.
+    inactiveSettled.current =
+      !import.meta.env.DEV &&
+      !enabled &&
+      !live &&
+      !closedHot &&
+      !closedHovered.current &&
+      !armed &&
+      reveal.current === 0 &&
+      openLevel.current === 0 &&
+      tu.mode === 'idle' &&
+      pageDrag.current === null &&
+      hoveredLink.current === null &&
+      hoveredImage.current === null &&
+      leaf.current?.visible === false &&
+      Math.abs((hoverScale.current?.scale.x ?? width) / width - 1) < 1e-8
   })
 
   /* --------------------------------------------------------------- render */
@@ -1306,7 +1789,7 @@ export default function Book({
   return (
     <group position={position} rotation-y={rotationY}>
       <group ref={shift}>
-        <group scale={width}>
+        <group ref={hoverScale} scale={width}>
           {/* Right half stays put; the left half hangs on the spine hinge. */}
           {/* Casts, does not receive. The moon's map covers the whole camp at
               about three centimetres a texel, and a single texel edge crossing
@@ -1338,24 +1821,49 @@ export default function Book({
             <mesh geometry={parts.gutter} material={gutterMat} />
           </group>
           <group ref={hinge} position={[0, HINGE_Y, 0]}>
-            <group
-              position={[0, -HINGE_Y, 0]}
-              // The closed cover folds onto *this* board — see the hinge
-              // rotation above — so it's the one the reader actually sees
-              // and clicks to open the journal. Dead once it's open past a
-              // sliver: past that the pages themselves are what's on screen.
-              onPointerOver={() => {
-                if (enabled && openLevel.current < 0.05) document.body.classList.add('camp-hover')
-              }}
-              onPointerOut={() => document.body.classList.remove('camp-hover')}
-              onClick={(e) => {
-                if (!enabled || openLevel.current >= 0.05) return
-                e.stopPropagation()
-                sfxBookOpen()
-                onOpenRequest()
-              }}
-            >
-              <mesh geometry={parts.coverL} material={coverMat} castShadow />
+            <group position={[0, -HINGE_Y, 0]}>
+              {/* Hover ownership belongs to one mesh, not this multi-mesh
+                  group. Group bubbling produced several over/out pairs from
+                  the cover, page block and title plane and could leave the
+                  scale/outline latched after rapid edge crossings. */}
+              <mesh
+                ref={setFrontCover}
+                geometry={parts.coverL}
+                material={coverMat}
+                castShadow
+                onPointerOver={(event) => {
+                  event.stopPropagation()
+                  const closed = enabled && openLevel.current < 0.05
+                  closedHovered.current = closed
+                  if (closed) document.body.classList.add('camp-hover')
+                  onClosedHover(index, closed)
+                }}
+                onPointerOut={(event) => {
+                  event.stopPropagation()
+                  clearClosedHover()
+                }}
+                onPointerLeave={clearClosedHover}
+                onPointerCancel={clearClosedHover}
+                onClick={(e) => {
+                  if (!enabled || openLevel.current >= 0.05) return
+                  e.stopPropagation()
+                  clearClosedHover()
+                  // Reopening always starts at the beginning. The normal
+                  // put-away reset runs after the exit animation; doing the
+                  // same reset here is a final guard for a quick return or a
+                  // journal closed from its own edge page inside the tent.
+                  if (FROZEN_SPREAD === null) {
+                    shown.current = { left: 0, right: 0 }
+                    turn.current = { t: 1, dir: 1, to: 0, mode: 'idle' }
+                    pageDrag.current = null
+                    dragEndpoint.current = null
+                    if (spread === 0) repaint()
+                    else setSpread(0)
+                  }
+                  sfxBookOpen()
+                  onOpenRequest()
+                }}
+              />
               <mesh
                 ref={leftPage}
                 geometry={parts.left.geometry}
@@ -1366,7 +1874,12 @@ export default function Book({
                   x, because this face is only ever seen from underneath once
                   the cover has flipped shut. */}
               <mesh
-                position={[-(GUTTER + (0.5 - GUTTER + SQUARE) / 2) + SQUARE * 0.5, -0.0012, 0]}
+                raycast={() => null}
+                position={[
+                  -(GUTTER + (0.5 - GUTTER + SQUARE) / 2) + SQUARE * 0.5,
+                  -0.0012,
+                  0,
+                ]}
                 rotation={[Math.PI / 2, 0, 0]}
                 scale={[-(0.5 - GUTTER + SQUARE) * 0.82, -(PAGE_DEPTH + SQUARE * 2) * 0.82, 1]}
               >
@@ -1375,7 +1888,7 @@ export default function Book({
                   map={coverPage.tex}
                   transparent
                   depthWrite={false}
-                  toneMapped={false}
+                  toneMapped
                 />
               </mesh>
             </group>
@@ -1403,10 +1916,11 @@ export default function Book({
               position={[SPINE_OFF, 0, 0]}
               rotation-x={-Math.PI / 2}
               material={leafMat.material}
-              /* Takes light from the room the way the blocks do. It does not
-                 cast: the shadow pass draws the undisplaced plane, so a cast
-                 shadow would be of a flat sheet while the lit one is curled. */
-              receiveShadow
+              /* Lit by the room, but deliberately neither casting nor receiving
+                 shadows. The stationary page blocks also do not receive the
+                 camp's coarse shadow map. Letting only the moving leaf receive
+                 it made the sheet darken at exactly 0% and 100% while a drag
+                 was still held, then snap back when release hid the leaf. */
               /* Enough segments across the sheet for the curl to be a curve
                  rather than a fold. The old 14 was sized for a bend that only
                  had to bow the middle; a lag that grows toward the fore edge
@@ -1417,17 +1931,32 @@ export default function Book({
             </mesh>
           </group>
 
+          {/* Full-sheet gestures sit a hair below links and image plates. Those
+              marks stop propagation, so their authored action wins; all
+              unclaimed paper clicks or drags arrive here. */}
+          <PageGesture
+            side="left"
+            onPointerDown={(event) => beginPageGesture('left', event)}
+            onPointerMove={movePageGesture}
+            onPointerUp={endPageGesture}
+            onPointerCancel={(event) => endPageGesture(event, true)}
+          />
+          <PageGesture
+            side="right"
+            onPointerDown={(event) => beginPageGesture('right', event)}
+            onPointerMove={movePageGesture}
+            onPointerUp={endPageGesture}
+            onPointerCancel={(event) => endPageGesture(event, true)}
+          />
+
           {armed &&
             hits.map(({ hit, side }, i) => (
               <PageMark
                 key={`${hit.to}-${i}`}
                 side={side}
                 rect={hit}
-                accent={accent}
-                hot={hovered === i}
-                opacity={0.44}
-                onOver={() => setHovered(i)}
-                onOut={() => setHovered(null)}
+                onOver={() => setLinkHover(hit, side)}
+                onOut={() => clearLinkHover(hit, side)}
                 onClick={() => follow(hit.to, side)}
               />
             ))}
@@ -1442,12 +1971,9 @@ export default function Book({
                 key={`img-${hit.src}-${i}`}
                 side={side}
                 rect={hit}
-                accent={accent}
-                hot={platePressed === i}
-                opacity={0.2}
                 cursor="zoom"
-                onOver={() => setPlatePressed(i)}
-                onOut={() => setPlatePressed(null)}
+                onOver={() => setImageHover(hit, side)}
+                onOut={() => clearImageHover(hit, side)}
                 onClick={() => {
                   if (hit.to) {
                     follow(hit.to, side)
@@ -1459,31 +1985,56 @@ export default function Book({
               />
             ))}
 
-          {/* Click targets cut to the plates the painter actually drew, so the
-              thing you press is the thing you see. */}
-          {armed &&
-            turns.map(({ rect, side, dir }) => (
-              <Corner key={side} side={side} rect={rect} accent={accent} onClick={() => go(dir)} />
-            ))}
         </group>
       </group>
     </group>
   )
 }
+/** Invisible, curved hit surface covering one entire open page. */
+function PageGesture({
+  side,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: {
+  side: 'left' | 'right'
+  onPointerDown: (event: ThreeEvent<PointerEvent>) => void
+  onPointerMove: (event: ThreeEvent<PointerEvent>) => void
+  onPointerUp: (event: ThreeEvent<PointerEvent>) => void
+  onPointerCancel: (event: ThreeEvent<PointerEvent>) => void
+}) {
+  const geometry = useMemo(() => buildPagePatch(side, FULL_PAGE_RECT, 18, 0.0001), [side])
+  useEffect(() => () => geometry.dispose(), [geometry])
 
+  return (
+    <mesh
+      geometry={geometry}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+    >
+      <meshBasicMaterial
+        transparent
+        opacity={0}
+        depthWrite={false}
+        colorWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  )
+}
 /**
- * A hoverable mark lying on the printed surface: a link highlight, or the plate
- * over a page-turn control.
+ * An invisible hover/click target lying on the printed surface. Its feedback is
+ * repainted into the page canvas: link glyphs change ink, while an image's
+ * already-existing paper mount changes colour outside the print.
  *
- * The geometry follows the paper's curve and the colour is cut with a soft mask
- * — see `buildPagePatch` and `markMask`.
+ * The geometry follows the paper's curve — see `buildPagePatch`.
  */
 function PageMark({
   side,
   rect,
-  accent,
-  hot,
-  opacity = 0.34,
   cursor = 'hand',
   onOver,
   onOut,
@@ -1491,9 +2042,6 @@ function PageMark({
 }: {
   side: 'left' | 'right'
   rect: Rect
-  accent: string
-  hot: boolean
-  opacity?: number
   /**
    * What the pointer becomes over this mark.
    *
@@ -1523,52 +2071,17 @@ function PageMark({
         document.body.classList.remove('camp-hover')
         document.body.classList.remove('camp-zoom')
       }}
+      // Reserve the entire press sequence for the printed control. Without
+      // these, pointer-down bubbled to the full-page drag surface and captured
+      // the pointer before this mark's click could fire.
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation()
         onClick()
       }}
     >
-      <meshBasicMaterial
-        map={markMask ?? undefined}
-        color={accent}
-        transparent
-        opacity={hot ? opacity : 0}
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-        toneMapped={false}
-        /* Held off the paper in depth rather than in space — see the note in
-           `buildPagePatch`. */
-        polygonOffset
-        polygonOffsetFactor={-4}
-        polygonOffsetUnits={-4}
-      />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
     </mesh>
-  )
-}
-
-/** Click target over the page-turn plate. */
-function Corner({
-  side,
-  rect,
-  accent,
-  onClick,
-}: {
-  side: 'left' | 'right'
-  rect: Rect
-  accent: string
-  onClick: () => void
-}) {
-  const [hot, setHot] = useState(false)
-  return (
-    <PageMark
-      side={side}
-      rect={rect}
-      accent={accent}
-      hot={hot}
-      opacity={0.4}
-      onOver={() => setHot(true)}
-      onOut={() => setHot(false)}
-      onClick={onClick}
-    />
   )
 }

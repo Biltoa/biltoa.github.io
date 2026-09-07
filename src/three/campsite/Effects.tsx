@@ -2,7 +2,13 @@ import { useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame, useLoader, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Part } from './useKit'
-import { fireFlicker, fireTemp, makeFlameMaterial, makeSmokeLineMaterial, makeSmokeMaterial } from './fire'
+import {
+  fireFlicker,
+  fireTemp,
+  makeFlameMaterial,
+  makeSmokeLineMaterial,
+  makeTorchSmokeMaterial,
+} from './fire'
 import { AURORA_BOUNCE_HIGH, AURORA_BOUNCE_LOW, AURORA_BOUNCE_MID, applyWind } from './wind'
 
 /* -------------------------------------------------------------------------- */
@@ -41,10 +47,10 @@ export const FIRELIGHT = {
   // the first attempt.
   // LIGHTING-REWORK (2026-08-17): baked from ?debug at the user's request —
   // intensity 34->80, distance 11->30.
-  key: { intensity: 80, distance: 30, color: '#ffbb82' },
+  key: { intensity: 34, distance: 14, color: '#ffc58f' },
   /** Cool and hot ends of the flame's colour swing. */
-  coolEnd: /* @__PURE__ */ new THREE.Color('#ff7a24'),
-  hotEnd: /* @__PURE__ */ new THREE.Color('#ffc272'),
+  coolEnd: /* @__PURE__ */ new THREE.Color('#ff8a3d'),
+  hotEnd: /* @__PURE__ */ new THREE.Color('#ffd08a'),
   /**
    * Dynamic shadows from the fire. **Off.**
    *
@@ -60,7 +66,7 @@ export const FIRELIGHT = {
    */
   shadow: { enabled: false, mapSize: 512, bias: -0.006, normalBias: 0.06 },
   /** Torch flames: smaller radius, lower intensity, same colour family. */
-  torch: { intensity: 12, reach: 8.5 },
+  torch: { intensity: 16, reach: 8.2 },
 } as const
 
 /* -------------------------------------------------------------------------- */
@@ -186,7 +192,6 @@ export function InstancedParts({
     </>
   )
 }
-
 /**
  * Roughly where the lens sits while the reader is looking at the camp.
  *
@@ -278,7 +283,7 @@ const SKY_VERT = /* glsl */ `
  * bite out of its lower right. Nothing masks it; the tree is simply nearer
  * and the depth test does the rest.
  */
-export const MOON_DIR = /* @__PURE__ */ new THREE.Vector3(-0.2133, 0.2797, -0.9361).normalize()
+export const MOON_DIR = /* @__PURE__ */ new THREE.Vector3(-0.2133, 0.225, -0.9361).normalize()
 
 /**
  * Direction the key light comes *from*: the same bearing as the moon, but
@@ -451,7 +456,11 @@ const SKY_FRAG = /* glsl */ `
    * once the octaves start rotating past each other.
    */
   float tri(float x) { return clamp(abs(fract(x) - 0.5), 0.01, 0.49); }
-  vec2 tri2(vec2 p) { return vec2(tri(p.x) + tri(p.y), tri(p.y + tri(p.x))); }
+  vec2 tri2(vec2 p) {
+    float tx = tri(p.x);
+    float ty = tri(p.y);
+    return vec2(tx + ty, tri(p.y + tx));
+  }
 
   /**
    * The aurora texture: five octaves of triangle-wave turbulence, each one
@@ -470,7 +479,7 @@ const SKY_FRAG = /* glsl */ `
    * small everywhere else. That is the trail. The 0.55 ceiling caps how opaque
    * any one sample can be, which matters because forty are about to be summed.
    */
-  float triNoise2d(vec2 p, float spd, float t) {
+  float triNoise2d(vec2 p, mat2 timeRotation) {
     float z = 1.8;
     float z2 = 2.5;
     float rz = 0.0;
@@ -478,7 +487,7 @@ const SKY_FRAG = /* glsl */ `
     vec2 bp = p;
     for (int i = 0; i < 5; i++) {
       vec2 dg = tri2(bp * 1.85) * 0.75;
-      dg *= mm2(t * spd);
+      dg *= timeRotation;
       p -= dg / z2;
 
       bp *= 1.3;
@@ -514,10 +523,17 @@ const SKY_FRAG = /* glsl */ `
    * **The sample plane is anisotropic, and that is what makes the rays.** See
    * AURORA_RAYS below — it is the one part of this that is not the reference's.
    */
-  vec4 aurora(vec3 ro, vec3 rd) {
+  vec4 aurora(vec3 rd) {
     vec4 col = vec4(0.0);
     vec4 avgCol = vec4(0.0);
     float t = uTime;
+    // These values are invariant across all forty samples. In particular,
+    // evaluating mm2 here avoids forty identical pairs of sin/cos calls while
+    // preserving the five-octave noise loop exactly.
+    mat2 timeRotation = mm2(t * 0.22);
+    float invRayDenom = 1.0 / (rd.y * 2.0 + 0.4);
+    vec2 rayPlaneStep = rd.zx * vec2(1.15, 3.4);
+    float auroraDrift = t * 0.035;
 
     /*
       AURORA_HUE: the colour ramp is advanced by bearing as well as by altitude.
@@ -540,17 +556,18 @@ const SKY_FRAG = /* glsl */ `
     */
     float bearing = atan(rd.z, rd.x) + 1.5707963;
     float hueBias = 1.15 * smoothstep(0.16, 0.62, abs(bearing));
-
+    // This hash depends only on the output pixel, not on the ray-march step.
+    // Compute it once instead of up to forty times per sky fragment.
+    float pixelOffset = 0.006 * hash(gl_FragCoord.xy);
     for (int i = 0; i < 40; i++) {
       float fi = float(i);
-      float of = 0.006 * hash(gl_FragCoord.xy) * smoothstep(0.0, 15.0, fi);
+      float of = pixelOffset * smoothstep(0.0, 15.0, fi);
       // Ray-plane intersection with the shell at this altitude. The 0.4 in the
       // denominator keeps it finite as rd.y goes to zero — without it a ray
       // along the horizon marches to infinity and the field degenerates into a
       // smear.
-      float pt = ((0.8 + pow(fi, 1.4) * 0.002) - ro.y) / (rd.y * 2.0 + 0.4);
+      float pt = (0.8 + pow(fi, 1.4) * 0.002) * invRayDenom;
       pt -= of;
-      vec3 bpos = ro + pt * rd;
 
       /*
         AURORA_RAYS: the field is sampled far finer across the view axis than
@@ -581,9 +598,9 @@ const SKY_FRAG = /* glsl */ `
         reads as flowing rather than static. Slow enough that it still looks
         like atmosphere, not a scrolling texture.
       */
-      vec2 p = bpos.zx * vec2(1.15, 3.4);
-      p.x += t * 0.035;
-      float rzt = triNoise2d(p, 0.22, t);
+      vec2 p = pt * rayPlaneStep;
+      p.x += auroraDrift;
+      float rzt = triNoise2d(p, timeRotation);
 
       vec4 col2 = vec4(0.0, 0.0, 0.0, rzt);
       // Hue by altitude, out of three phase-shifted sines. Green low through
@@ -675,7 +692,9 @@ const SKY_FRAG = /* glsl */ `
     // Gated: forty evaluations of a five-octave folded field is by a wide
     // margin the most expensive thing in this shader, and below the horizon
     // there is nothing to draw. ?aurora=0 is how its share is measured.
-    if (h > 0.012 && uAurora > 0.001) {
+    // Outside these exact smoothstep endpoints the envelope below is zero, so
+    // skip the expensive field march without changing a single output pixel.
+    if (h > 0.035 && h < 0.378 && uAurora > 0.001) {
       /*
         smoothstep, not a multiply.
 
@@ -685,7 +704,7 @@ const SKY_FRAG = /* glsl */ `
         off at 1.5, which puts the brightest trails just under the ceiling and
         leaves the faint ones on the toe where the colour still separates.
       */
-      vec4 aur = smoothstep(0.0, 1.5, aurora(vec3(0.0), dir)) * uAurora;
+      vec4 aur = smoothstep(0.0, 1.5, aurora(dir)) * uAurora;
       /*
         The same band envelope the masked-group version stood in, and it is
         kept for the same three reasons.
@@ -963,12 +982,22 @@ export function NightSky() {
     const v = Number(new URLSearchParams(window.location.search).get('skyt'))
     return Number.isFinite(v) ? v : 0
   }, [])
+  /** Dev-only fixed sky clock for exact before/after shader screenshots. */
+  const SKY_FREEZE = useMemo(() => {
+    if (!import.meta.env.DEV || typeof window === 'undefined') return null
+    const raw = new URLSearchParams(window.location.search).get('skyfreeze')
+    if (raw === null) return null
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : null
+  }, [])
 
   useFrame((_state, delta) => {
     const u = mat.current?.uniforms
     if (!u) return
-    skyTime.current = (skyTime.current + Math.min(delta, 0.1)) % AURORA_WRAP
-    u.uTime.value = skyTime.current + SKY_T0
+    if (SKY_FREEZE === null) {
+      skyTime.current = (skyTime.current + Math.min(delta, 0.1)) % AURORA_WRAP
+    }
+    u.uTime.value = SKY_FREEZE ?? skyTime.current + SKY_T0
   })
 
   return (
@@ -1175,18 +1204,67 @@ export function Stars({ count = 6600 }: { count?: number }) {
 
 /* --------------------------------------------------------------- fireflies */
 
-const ORB_VERT = /* glsl */ `
+function makeOrbVertexShader(exclusionCount: number) {
+  const exclusionUniforms = Array.from(
+    { length: exclusionCount },
+    (_, i) => `
+  uniform vec4 uExclusionFrame${i};
+  uniform vec3 uExclusionBounds${i};`
+  ).join('')
+
+  // Keep the exclusion passes expanded and in declaration order. Apart from
+  // avoiding dynamic uniform-array indexing on older WebGL 1 drivers, this is
+  // the exact order of the former CPU loop: an orb pushed by one tent is fed
+  // into the next tent's test rather than every test reading its original path.
+  const exclusionPasses = Array.from(
+    { length: exclusionCount },
+    (_, i) => `
+    if (orbPosition.y <= uExclusionBounds${i}.z) {
+      vec2 delta${i} = orbPosition.xz - uExclusionFrame${i}.xy;
+      vec2 localPosition${i} = vec2(
+        uExclusionFrame${i}.z * delta${i}.x - uExclusionFrame${i}.w * delta${i}.y,
+        uExclusionFrame${i}.w * delta${i}.x + uExclusionFrame${i}.z * delta${i}.y
+      );
+      float normalizedDistance${i} = length(localPosition${i} / uExclusionBounds${i}.xy);
+      if (normalizedDistance${i} < 1.0) {
+        localPosition${i} *= 1.08 / max(normalizedDistance${i}, 0.001);
+        orbPosition.xz = uExclusionFrame${i}.xy + vec2(
+          uExclusionFrame${i}.z * localPosition${i}.x + uExclusionFrame${i}.w * localPosition${i}.y,
+          -uExclusionFrame${i}.w * localPosition${i}.x + uExclusionFrame${i}.z * localPosition${i}.y
+        );
+      }
+    }`
+  ).join('')
+
+  return /* glsl */ `
+  attribute vec3 aMotion;
   attribute float aSize;
   attribute float aPhase;
   uniform float uTime;
   uniform float uPixelRatio;
+  uniform vec2 uCenter;${exclusionUniforms}
   varying float vGlow;
 
   void main() {
+    // position is immutable seed data: angle, radius and base height. Motion
+    // contains speed, bob rate and trajectory phase. The equations below are
+    // deliberately the former CPU equations in the same order.
+    float angle = position.x + uTime * aMotion.x * 0.12;
+    float wobble = sin(uTime * aMotion.x + aMotion.z);
+    float radius = position.y + wobble * 0.9;
+    vec3 orbPosition;
+    orbPosition.x = cos(angle) * radius + uCenter.x;
+    orbPosition.z = sin(angle) * radius + uCenter.y;
+    orbPosition.y =
+      position.z +
+      sin(uTime * aMotion.y + aMotion.z) * 0.45 +
+      max(0.0, orbPosition.z - uCenter.y - 8.0) * 0.4;
+${exclusionPasses}
+
     // Each orb breathes on its own phase, and the dimmest moment never reaches
     // zero — an orb that blinks out entirely reads as a dropped frame.
     vGlow = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(uTime * (0.9 + fract(aPhase) * 1.6) + aPhase * 6.2), 1.6);
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vec4 mv = modelViewMatrix * vec4(orbPosition, 1.0);
     // Hard ceiling in CSS pixels, hence the uPixelRatio on both sides. 78 was
     // still letting an orb that drifted near the lens draw a 78px disc, which
     // bloomed into a headlight; a firefly is a point of light, so 30 is the
@@ -1198,6 +1276,7 @@ const ORB_VERT = /* glsl */ `
     gl_Position = projectionMatrix * mv;
   }
 `
+}
 
 /**
  * The glowing orbs. Three stacked falloffs — a blown-out white core, a saturated
@@ -1235,34 +1314,76 @@ export function Fireflies({
   // stars, which made both of them look like a lens artefact.
   height = 4.2,
   center = [0, 0] as [number, number],
+  exclusions = [],
 }: {
   count?: number
   radius?: number
   height?: number
   center?: [number, number]
+  exclusions?: ReadonlyArray<{
+    x: number
+    z: number
+    yaw: number
+    halfWidth: number
+    halfDepth: number
+    maxY: number
+  }>
 }) {
   const { viewport } = useThree()
-  const uniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uPixelRatio: { value: 1 },
-      /*
-        VISUAL-13.3 (2026-08-30): '#fffdf2' / '#ffc04a' / '#ff8a1e' ->
-        '#eafff4' / '#8ff0b4' / '#2fbf8a'.
 
-        These are the specks drifting across the whole frame, and painted in
-        fire colours they read as embers — embers thirty metres from the fire,
-        at uniform density, up over the tents and into the sky, where they
-        clashed with the blue tent. Embers belong to the flame and are handled
-        there. What this system is actually for is ambient movement, so it is
-        now what it looks like: cool green fireflies, which sit against the
-        aurora rather than competing with the fire.
-      */
-      uCore: { value: new THREE.Color('#eafff4') },
-      uBody: { value: new THREE.Color('#8ff0b4') },
-      uHalo: { value: new THREE.Color('#2fbf8a') },
-    }),
-    []
+  const exclusionFrames = useMemo(
+    () =>
+      exclusions.map((exclusion) => ({
+        ...exclusion,
+        cos: Math.cos(exclusion.yaw),
+        sin: Math.sin(exclusion.yaw),
+      })),
+    [exclusions]
+  )
+
+  const vertexShader = useMemo(
+    () => makeOrbVertexShader(exclusionFrames.length),
+    [exclusionFrames.length]
+  )
+
+  const uniforms = useMemo(
+    () => {
+      const values: Record<
+        string,
+        { value: number | THREE.Color | THREE.Vector2 | THREE.Vector3 | THREE.Vector4 }
+      > = {
+        uTime: { value: 0 },
+        uPixelRatio: { value: 1 },
+        uCenter: { value: new THREE.Vector2(center[0], center[1]) },
+        /*
+          VISUAL-13.3 (2026-08-30): '#fffdf2' / '#ffc04a' / '#ff8a1e' ->
+          '#eafff4' / '#8ff0b4' / '#2fbf8a'.
+
+          These are the specks drifting across the whole frame, and painted in
+          fire colours they read as embers — embers thirty metres from the fire,
+          at uniform density, up over the tents and into the sky, where they
+          clashed with the blue tent. Embers belong to the flame and are handled
+          there. What this system is actually for is ambient movement, so it is
+          now what it looks like: cool green fireflies, which sit against the
+          aurora rather than competing with the fire.
+        */
+        uCore: { value: new THREE.Color('#eafff4') },
+        uBody: { value: new THREE.Color('#8ff0b4') },
+        uHalo: { value: new THREE.Color('#2fbf8a') },
+      }
+
+      for (let i = 0; i < exclusionFrames.length; i++) {
+        const exclusion = exclusionFrames[i]
+        values[`uExclusionFrame${i}`] = {
+          value: new THREE.Vector4(exclusion.x, exclusion.z, exclusion.cos, exclusion.sin),
+        }
+        values[`uExclusionBounds${i}`] = {
+          value: new THREE.Vector3(exclusion.halfWidth, exclusion.halfDepth, exclusion.maxY),
+        }
+      }
+      return values
+    },
+    [center[0], center[1], exclusionFrames]
   )
 
   /** The material owns its own copy of the uniforms. See AURORA_SPIN. */
@@ -1270,66 +1391,54 @@ export function Fireflies({
 
   useLayoutEffect(() => {
     if (mat.current) mat.current.uniforms.uPixelRatio.value = Math.min(viewport.dpr, 2)
-  }, [viewport.dpr])
-
-  const seeds = useMemo(() => {
-    const r = rng(21)
-    return Array.from({ length: count }, () => ({
-      // Inner radius keeps them off the lens — an orb a metre from the camera
-      // blooms into a sun.
-      a: r() * Math.PI * 2,
-      rad: 9 + r() * radius,
-      y: 0.4 + r() * height,
-      speed: 0.12 + r() * 0.35,
-      bob: 0.3 + r() * 0.9,
-      phase: r() * Math.PI * 2,
-    }))
-  }, [count, radius, height])
+  }, [viewport.dpr, exclusionFrames.length])
 
   const geo = useMemo(() => {
-    const r = rng(88)
+    const pathRng = rng(21)
+    const visualRng = rng(88)
     const g = new THREE.BufferGeometry()
+    const seedPosition = new Float32Array(count * 3)
+    const motion = new Float32Array(count * 3)
     const size = new Float32Array(count)
     const phase = new Float32Array(count)
     for (let i = 0; i < count; i++) {
+      const offset = i * 3
+      // Static trajectory seeds. `position` doubles as the draw-count source
+      // Three expects every non-indexed geometry to have, while the shader
+      // interprets it as angle/radius/base-height instead of an animated point.
+      seedPosition[offset] = pathRng() * Math.PI * 2
+      seedPosition[offset + 1] = 9 + pathRng() * radius
+      seedPosition[offset + 2] = 0.4 + pathRng() * height
+      motion[offset] = 0.12 + pathRng() * 0.35
+      motion[offset + 1] = 0.3 + pathRng() * 0.9
+      motion[offset + 2] = pathRng() * Math.PI * 2
+
       // Skewed so most orbs are small and a handful are proper lanterns. The
       // spread is deliberately narrow: with a wide one the big orbs sat at the
       // point-size cap all the way across the clearing, so they stopped
       // shrinking with distance and read as a foreground layer.
-      size[i] = 0.7 + Math.pow(r(), 2.6) * 1.7
-      phase[i] = r() * 10
+      size[i] = 0.7 + Math.pow(visualRng(), 2.6) * 1.7
+      phase[i] = visualRng() * 10
     }
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3))
+    g.setAttribute('position', new THREE.BufferAttribute(seedPosition, 3))
+    g.setAttribute('aMotion', new THREE.BufferAttribute(motion, 3))
     g.setAttribute('aSize', new THREE.BufferAttribute(size, 1))
     g.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1))
     return g
-  }, [count])
+  }, [count, radius, height])
+
+  useLayoutEffect(() => () => geo.dispose(), [geo])
 
   useFrame((state) => {
-    const t = state.clock.elapsedTime
-    if (mat.current) mat.current.uniforms.uTime.value = t
-    const pos = geo.getAttribute('position') as THREE.BufferAttribute
-
-    seeds.forEach((s, i) => {
-      const a = s.a + t * s.speed * 0.12
-      const wob = Math.sin(t * s.speed + s.phase)
-      const rad = s.rad + wob * 0.9
-      const z = Math.sin(a) * rad + center[1]
-      pos.setXYZ(
-        i,
-        Math.cos(a) * rad + center[0],
-        s.y + Math.sin(t * s.bob + s.phase) * 0.45 + Math.max(0, z - center[1] - 8) * 0.4,
-        z
-      )
-    })
-    pos.needsUpdate = true
+    if (mat.current) mat.current.uniforms.uTime.value = state.clock.elapsedTime
   })
 
   return (
     <points geometry={geo} frustumCulled={false} renderOrder={3}>
       <shaderMaterial
+        key={`orb-${exclusionFrames.length}`}
         ref={mat}
-        vertexShader={ORB_VERT}
+        vertexShader={vertexShader}
         fragmentShader={ORB_FRAG}
         uniforms={uniforms}
         transparent
@@ -1393,10 +1502,9 @@ export function Leaves({ count = 110 }: { count?: number }) {
 
   useFrame((state) => {
     const t = state.clock.elapsedTime
-    for (const [mesh, offset] of [
-      [refA.current, 0],
-      [refB.current, half],
-    ] as const) {
+    for (let bank = 0; bank < 2; bank++) {
+      const mesh = bank === 0 ? refA.current : refB.current
+      const offset = bank === 0 ? 0 : half
       if (!mesh) continue
       for (let i = 0; i < mesh.count; i++) {
         const s = seeds[offset + i]
@@ -1543,6 +1651,12 @@ export function Impostors({ center = [0, 0] as [number, number] }) {
           // reach out that far to do.
           emissive: new THREE.Color('#050d1c'),
         })
+        // Instanced transparent cards sort as one object, so the translucent
+        // haze sheets cannot reliably sit in front of every individual tree.
+        // Tag them for a stronger pass through the scene's existing height fog
+        // instead; this preserves their soft edges and adds only two multiplies
+        // to a shader they already run.
+        m.defines = { ...m.defines, CAMPSITE_IMPOSTOR_FOG: '' }
         applyWind(m, {
           amplitude: 0,
           height: 1,
@@ -1641,6 +1755,191 @@ export function Impostors({ center = [0, 0] as [number, number] }) {
   )
 }
 
+/**
+ * Test-only replacement for the old treeline.
+ *
+ * The source "billboard" textures are actually atlases containing eight
+ * separately packed camera angles. Mapping a whole atlas to one plane drew all
+ * eight trees at once, including oblique views whose trunks lie sideways.
+ * These cards use two extracted, connected silhouettes with vertical trunks.
+ * They also yaw around world Y to face the camera, but can never pitch or roll.
+ * Keep this component in the isolated `?impostors=1` scene until the study is
+ * approved; the normal campsite intentionally continues to use `Impostors`.
+ */
+export function ImpostorStudy({ center = [0, 0] as [number, number] }) {
+  const textures = useLoader(THREE.TextureLoader, [
+    '/textures/impostors-preview/tree-upright-a.webp',
+    '/textures/impostors-preview/tree-upright-b.webp',
+  ])
+  const { camera, gl } = useThree()
+  const refs = useRef<(THREE.InstancedMesh | null)[]>([])
+  const dummy = useMemo(() => new THREE.Object3D(), [])
+  const lastCamera = useRef(new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY))
+
+  useLayoutEffect(() => {
+    const anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy())
+    for (const texture of textures) {
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.minFilter = THREE.LinearMipmapLinearFilter
+      texture.magFilter = THREE.LinearFilter
+      texture.anisotropy = anisotropy
+      texture.generateMipmaps = true
+      texture.needsUpdate = true
+    }
+  }, [gl, textures])
+
+  const placements = useMemo(() => {
+    const random = rng(90421)
+    const byTexture: {
+      pos: [number, number, number]
+      height: number
+      width: number
+      mirror: boolean
+      shade: number
+    }[][] = [[], []]
+
+    // Irregular depth bands give the treeline a forest volume without putting
+    // every root and crown on the same ruler-straight screen-space row.
+    const bands = [
+      { count: 22, z: -43, spread: 56, minHeight: 10.5, maxHeight: 14.5 },
+      { count: 27, z: -61, spread: 75, minHeight: 12.5, maxHeight: 17 },
+      { count: 31, z: -83, spread: 98, minHeight: 14.5, maxHeight: 20 },
+    ]
+
+    bands.forEach((band, bandIndex) => {
+      for (let i = 0; i < band.count; i++) {
+        const lane = band.count === 1 ? 0.5 : i / (band.count - 1)
+        const x = center[0] + THREE.MathUtils.lerp(-band.spread, band.spread, lane) + (random() - 0.5) * 5.5
+        const z = center[1] + band.z + (random() - 0.5) * (10 + bandIndex * 4)
+        const rawHeight = THREE.MathUtils.lerp(band.minHeight, band.maxHeight, random())
+        const groundY = -0.34 + random() * 0.22
+        // The annotated skyline is a hard world-space ceiling. Because the
+        // cards are rooted on the same terrain plane, this also holds from the
+        // pointer-driven left and right camera positions.
+        const skylineCap = 9.3
+        const height = Math.min(rawHeight, (skylineCap - groundY) / 0.83)
+        // The second silhouette has the same dense crown as the real tree
+        // batches. Keep the open, branching variant as occasional breakup,
+        // not half of the distant forest where its sky gaps read as cyan.
+        const type = random() < 0.82 ? 1 : 0
+        byTexture[type].push({
+          // Bury the bottom 22% of every card, proportional to its scale. Both
+          // approved source silhouettes keep their complete root flare inside
+          // that region, leaving only the straight trunk above terrain. The
+          // root flare is below y=0 and depth-occluded by the terrain instead
+          // of hanging in front of it.
+          pos: [x, groundY - height * 0.22, z],
+          height,
+          width: height * (type === 0 ? 0.532 : 0.536) * (0.9 + random() * 0.18),
+          mirror: random() > 0.5,
+          shade: 0.76 + random() * 0.22,
+        })
+      }
+    })
+
+    return byTexture
+  }, [center])
+
+  const geometry = useMemo(() => {
+    const result = new THREE.PlaneGeometry(1, 1)
+    // Put the local origin at the roots instead of the middle of the texture.
+    result.translate(0, 0.5, 0)
+    return result
+  }, [])
+
+  useLayoutEffect(() => () => geometry.dispose(), [geometry])
+
+  const materials = useMemo(
+    () =>
+      textures.map(
+        (texture) =>
+          new THREE.MeshLambertMaterial({
+            map: texture,
+            // Match the real tree cards' diffuse-only night response. Their
+            // material deliberately has no Standard/PBR specular sheen, and a
+            // low texture-shaped emissive floor stops back-lit leaves turning
+            // into black cut-outs against the aurora.
+            color: new THREE.Color('#456252'),
+            emissive: new THREE.Color('#2c4639'),
+            emissiveIntensity: 0.66,
+            emissiveMap: texture,
+            alphaTest: 0.5,
+            transparent: false,
+            depthTest: true,
+            depthWrite: true,
+            // Mirrored instances reverse their triangle winding. Rendering
+            // both sides keeps that cheap per-instance variation in the same
+            // two draw calls; the cards always face the camera either way.
+            side: THREE.DoubleSide,
+            toneMapped: true,
+            alphaToCoverage: true,
+          })
+      ),
+    [textures]
+  )
+
+  useLayoutEffect(() => () => materials.forEach((material) => material.dispose()), [materials])
+
+  const studyColors = useMemo(
+    () => [new THREE.Color('#8d9b87'), new THREE.Color('#788586')],
+    []
+  )
+
+  const writeMatrices = (cameraX: number, cameraZ: number) => {
+    for (let groupIndex = 0; groupIndex < placements.length; groupIndex++) {
+      const mesh = refs.current[groupIndex]
+      if (!mesh) continue
+      const tint = new THREE.Color()
+
+      placements[groupIndex].forEach((tree, index) => {
+        const dx = cameraX - tree.pos[0]
+        const dz = cameraZ - tree.pos[2]
+        dummy.position.set(...tree.pos)
+        // Yaw only. This is the invariant that prevents a trunk from ever
+        // becoming diagonal even while the pointer-driven camera moves.
+        dummy.rotation.set(0, Math.atan2(dx, dz), 0)
+        dummy.scale.set(tree.mirror ? -tree.width : tree.width, tree.height, 1)
+        dummy.updateMatrix()
+        mesh.setMatrixAt(index, dummy.matrix)
+
+        const coolBand = 0.5 + 0.5 * Math.sin(tree.pos[0] * 0.047 - tree.pos[2] * 0.021)
+        tint.copy(studyColors[0]).lerp(studyColors[1], coolBand)
+        tint.multiplyScalar(tree.shade)
+        mesh.setColorAt(index, tint)
+      })
+
+      mesh.instanceMatrix.needsUpdate = true
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+    }
+  }
+
+  useLayoutEffect(() => {
+    writeMatrices(camera.position.x, camera.position.z)
+  })
+
+  useFrame(() => {
+    const previous = lastCamera.current
+    if (Math.abs(previous.x - camera.position.x) < 0.002 && Math.abs(previous.y - camera.position.z) < 0.002) return
+    previous.set(camera.position.x, camera.position.z)
+    writeMatrices(camera.position.x, camera.position.z)
+  })
+
+  return (
+    <>
+      {materials.map((material, groupIndex) => (
+        <instancedMesh
+          key={groupIndex}
+          ref={(mesh) => {
+            refs.current[groupIndex] = mesh
+          }}
+          args={[geometry, material, placements[groupIndex].length]}
+          frustumCulled={false}
+        />
+      ))}
+    </>
+  )
+}
+
 /* ------------------------------------------------------------------- haze */
 
 /**
@@ -1649,12 +1948,13 @@ export function Impostors({ center = [0, 0] as [number, number] }) {
  * The height fog in fog.ts tints geometry by distance; it cannot put anything
  * *between* two objects, so the near wood and the far wood still met at a hard
  * edge with nothing in the air to separate them. These are a handful of very
- * faint additive sheets — the moonlit haze the trees are standing in — which is
- * what gives the middle distance depth without touching anything in front.
+ * faint alpha-composited sheets — the moonlit haze the trees are standing in —
+ * which gives the middle distance depth without touching anything in front.
  *
- * All of them sit well behind the tents (z < -14) so nothing the reader is
- * actually looking at is veiled, and the whole set is additive at a few percent:
- * it lifts the blacks between the trunks and does nothing else.
+ * Every bank begins behind the tents. Small overlapping volumes are scattered
+ * laterally and in depth rather than stretched across the whole view, so their
+ * fully feathered silhouettes accumulate like pockets of fog instead of
+ * exposing the edge of a translucent wall.
  */
 function makeHazeTexture() {
   const w = 256
@@ -1663,82 +1963,170 @@ function makeHazeTexture() {
   c.width = w
   c.height = h
   const ctx = c.getContext('2d')!
-  // Vertical: densest a little above the ground, gone by the canopy.
-  const g = ctx.createLinearGradient(0, h, 0, 0)
-  g.addColorStop(0, 'rgba(255,255,255,0.55)')
-  g.addColorStop(0.18, 'rgba(255,255,255,1)')
-  g.addColorStop(0.55, 'rgba(255,255,255,0.35)')
+  // An elliptical density lobe that reaches zero at every edge. The previous
+  // linear gradient was still opaque at the bottom, revealing the plane as a
+  // hard horizontal boundary wherever it crossed the clearing.
+  ctx.save()
+  ctx.translate(w * 0.5, h * 0.58)
+  ctx.scale(1, 0.52)
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.49)
+  g.addColorStop(0, 'rgba(255,255,255,0.92)')
+  g.addColorStop(0.34, 'rgba(255,255,255,0.72)')
+  g.addColorStop(0.68, 'rgba(255,255,255,0.24)')
   g.addColorStop(1, 'rgba(255,255,255,0)')
   ctx.fillStyle = g
-  ctx.fillRect(0, 0, w, h)
-  // Then chew the ends off, so a bank has no vertical edge anywhere.
-  ctx.globalCompositeOperation = 'destination-in'
-  const e = ctx.createLinearGradient(0, 0, w, 0)
-  e.addColorStop(0, 'rgba(0,0,0,0)')
-  e.addColorStop(0.22, 'rgba(0,0,0,1)')
-  e.addColorStop(0.78, 'rgba(0,0,0,1)')
-  e.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = e
-  ctx.fillRect(0, 0, w, h)
+  ctx.fillRect(-w * 0.5, -h, w, h * 2)
+  ctx.restore()
+
+  // Break the smooth card into pockets. These deterministic soft cut-outs are
+  // cheaper than sampling noise in every translucent fragment and, across the
+  // depth stack below, read as a volume rather than a single gradient plane.
+  const r = rng(8821)
+  ctx.globalCompositeOperation = 'destination-out'
+  for (let i = 0; i < 22; i++) {
+    const x = w * (0.08 + r() * 0.84)
+    const y = h * (0.16 + r() * 0.7)
+    const radius = 7 + r() * 22
+    const hole = ctx.createRadialGradient(x, y, 0, x, y, radius)
+    hole.addColorStop(0, `rgba(0,0,0,${0.08 + r() * 0.22})`)
+    hole.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = hole
+    ctx.beginPath()
+    ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.fill()
+  }
   ctx.globalCompositeOperation = 'source-over'
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
 }
 
+const HAZE_VERTEX = /* glsl */ `
+  attribute float instanceOpacity;
+  attribute vec3 instanceTint;
+  varying vec2 vHazeUv;
+  varying float vHazeOpacity;
+  varying vec3 vHazeTint;
+
+  void main() {
+    vHazeUv = uv;
+    vHazeOpacity = instanceOpacity;
+    vHazeTint = instanceTint;
+    vec4 worldPosition = instanceMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * worldPosition;
+  }
+`
+
+const HAZE_FRAGMENT = /* glsl */ `
+  uniform sampler2D uHazeMap;
+  varying vec2 vHazeUv;
+  varying float vHazeOpacity;
+  varying vec3 vHazeTint;
+
+  void main() {
+    float density = texture2D(uHazeMap, vHazeUv).a * vHazeOpacity;
+    if (density < 0.002) discard;
+    gl_FragColor = vec4(vHazeTint, density);
+  }
+`
+
 export function Haze({ center = [0, 0] as [number, number] }) {
   const tex = useMemo(makeHazeTexture, [])
   useLayoutEffect(() => () => tex.dispose(), [tex])
+  const mesh = useRef<THREE.InstancedMesh>(null)
 
-  const banks = useMemo(() => {
+  const haze = useMemo(() => {
     const r = rng(6161)
-    // Very faint, and fainter the nearer the bank stands. These are additive
-    // over a wood that is already being asked to hold detail: at four times
-    // this the trunks in front of each sheet lifted to the same pale blue as
-    // the sheet itself and the whole forest went milky.
-    return [
-      { z: -15, w: 46, h: 7.5, o: 0.007, c: '#174a80' },
-      { z: -21, w: 62, h: 9.5, o: 0.010, c: '#17508a' },
-      { z: -29, w: 78, h: 12, o: 0.014, c: '#175090' },
-      { z: -40, w: 104, h: 15, o: 0.019, c: '#184e8c' },
-    ].map((b) => ({ ...b, x: center[0] + (r() - 0.5) * 6, y: b.h * 0.42 }))
+    // Ordered far-to-near so normal alpha blending integrates the volume in
+    // the same direction as a ray through the scene. The nearest pocket is at
+    // z=-12.4; the deepest tent ends near z=-9.6.
+    const layers = [
+      { z: -58, count: 4, span: 94, w: 34, h: 5.0, o: 0.105, c: '#496f7a' },
+      { z: -43, count: 4, span: 78, w: 28, h: 4.8, o: 0.115, c: '#527c86' },
+      { z: -32, count: 4, span: 65, w: 23, h: 4.5, o: 0.130, c: '#5b8991' },
+      { z: -23, count: 4, span: 55, w: 19, h: 4.2, o: 0.145, c: '#64969c' },
+      { z: -17.2, count: 4, span: 47, w: 16, h: 3.8, o: 0.160, c: '#6da0a5' },
+      { z: -13.5, count: 3, span: 39, w: 14, h: 3.4, o: 0.175, c: '#76aaad' },
+    ]
+    const banks: Array<{ x: number; y: number; z: number; w: number; h: number; yaw: number }> = []
+    const opacities: number[] = []
+    const tints: number[] = []
+
+    for (const layer of layers) {
+      for (let i = 0; i < layer.count; i++) {
+        const width = layer.w * (0.78 + r() * 0.44)
+        // No random bank is allowed to grow through the user's upper fog
+        // guide. The plane is centred just under half-height, so this caps its
+        // feather below y=4.5 even at the largest random scale.
+        const height = Math.min(4.55, layer.h * (0.78 + r() * 0.42))
+        const x = center[0] + ((i + 0.5) / layer.count - 0.5) * layer.span + (r() - 0.5) * width * 0.44
+        const color = new THREE.Color(layer.c).multiplyScalar(0.88 + r() * 0.2)
+        banks.push({
+          x,
+          y: height * (0.47 + r() * 0.04),
+          z: layer.z + (r() - 0.5) * Math.min(4.5, Math.abs(layer.z) * 0.09),
+          w: width,
+          h: height,
+          yaw: (r() - 0.5) * 0.18,
+        })
+        opacities.push(layer.o * (0.72 + r() * 0.56))
+        tints.push(color.r, color.g, color.b)
+      }
+    }
+
+    return {
+      banks,
+      opacities: new Float32Array(opacities),
+      tints: new Float32Array(tints),
+    }
   }, [center])
 
-  const mats = useRef<(THREE.MeshBasicMaterial | null)[]>([])
-
-  useFrame((state) => {
-    // Breathes very slowly, so the middle distance is never quite static.
-    const t = state.clock.elapsedTime
-    mats.current.forEach((m, i) => {
-      if (m) m.opacity = banks[i].o * (0.82 + Math.sin(t * 0.11 + i * 1.7) * 0.18)
+  useLayoutEffect(() => {
+    if (!mesh.current) return
+    const object = new THREE.Object3D()
+    haze.banks.forEach((bank, i) => {
+      object.position.set(bank.x, bank.y, bank.z)
+      object.rotation.set(0, bank.yaw, 0)
+      object.scale.set(bank.w, bank.h, 1)
+      object.updateMatrix()
+      mesh.current!.setMatrixAt(i, object.matrix)
     })
-  })
+    mesh.current.instanceMatrix.needsUpdate = true
+    mesh.current.computeBoundingSphere()
+  }, [haze])
+
+  const uniforms = useMemo(() => ({ uHazeMap: { value: tex } }), [tex])
 
   return (
-    <group>
-      {banks.map((b, i) => (
-        <mesh key={i} position={[b.x, b.y, b.z]} renderOrder={-1}>
-          <planeGeometry args={[b.w, b.h]} />
-          <meshBasicMaterial
-            ref={(m) => {
-              mats.current[i] = m
-            }}
-            map={tex}
-            color={b.c}
-            transparent
-            opacity={b.o}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            toneMapped={false}
-            fog={false}
-          />
-        </mesh>
-      ))}
-    </group>
+    <instancedMesh ref={mesh} args={[undefined, undefined, haze.banks.length]} renderOrder={-1} frustumCulled={false}>
+      <planeGeometry>
+        <instancedBufferAttribute attach="attributes-instanceOpacity" args={[haze.opacities, 1]} />
+        <instancedBufferAttribute attach="attributes-instanceTint" args={[haze.tints, 3]} />
+      </planeGeometry>
+      <shaderMaterial
+        uniforms={uniforms}
+        vertexShader={HAZE_VERTEX}
+        fragmentShader={HAZE_FRAGMENT}
+        transparent
+        depthWrite={false}
+        blending={THREE.NormalBlending}
+        side={THREE.DoubleSide}
+        toneMapped={false}
+      />
+    </instancedMesh>
   )
 }
 
 /* ------------------------------------------------------------------- fire */
+
+const CAMPFIRE_LAYERS = [
+  // Nested from the solid yellow core out to the faint dark-red envelope.
+  // Identical base pivots keep every layer seated between the logs.
+  { h: 1.3, w: 0.42, order: 4 },
+  { h: 1.64, w: 0.74, order: 3 },
+  { h: 1.92, w: 1.1, order: 2 },
+  { h: 2.1, w: 1.42, order: 1 },
+] as const
 
 /**
  * Campfire: crossed procedural flame quads, a flickering light, rising sparks,
@@ -1764,47 +2152,34 @@ export function Campfire({
   const sparks = useRef<THREE.Points>(null)
   const smokeGroup = useRef<THREE.Group>(null)
   const groundGlow = useRef<THREE.Mesh>(null)
-  const core = useRef<THREE.Mesh>(null)
 
-  // Three crossed tongues at different seeds and rates. Crossed quads mean the
-  // fire keeps volume from any angle without per-frame billboarding.
+  // The same visual construction as a torch: an opaque warm-yellow centre,
+  // then successively wider and more transparent orange/red silhouettes.
   const flameMats = useMemo(
     () => [
-      // Additive layers stack, so each one is well under full strength — three
-      // opaque tongues on top of each other clip to white and lose the shape.
-      makeFlameMaterial({ seed: 0.0, detail: 1.0, rise: 1.35, opacity: 0.52 }),
-      makeFlameMaterial({ seed: 3.7, detail: 1.25, rise: 1.75, opacity: 0.42 }),
-      makeFlameMaterial({ seed: 8.2, detail: 0.85, rise: 1.05, opacity: 0.32 }),
+      makeFlameMaterial({ seed: 0.0, detail: 2.2, rise: 2.25, opacity: 1, alphaPower: 1.1, brightness: 0.82, heatBias: 0.04, core: '#ffe2a0', mid: '#f6ae38', edge: '#df6214' }),
+      makeFlameMaterial({ seed: 4.1, detail: 1.9, rise: 1.9, opacity: 0.44, alphaPower: 1.05, brightness: 0.9, heatBias: 0.14, core: '#ffd078', mid: '#ef821b', edge: '#a72a08' }),
+      makeFlameMaterial({ seed: 8.6, detail: 1.55, rise: 1.55, opacity: 0.24, alphaPower: 1.0, brightness: 0.94, heatBias: 0.24, core: '#ffad54', mid: '#d95a0d', edge: '#761606' }),
+      makeFlameMaterial({ seed: 12.8, detail: 1.3, rise: 1.35, opacity: 0.11, alphaPower: 0.95, brightness: 0.88, heatBias: 0.34, core: '#e87829', mid: '#ae3607', edge: '#4e0e04' }),
     ],
     []
   )
 
-  /*
-    VISUAL-13.2 (2026-08-30): SMOKE 6 -> 9, colour '#9d8ab0' -> '#2b3450',
-    opacity 0.05 -> 0.085.
-
-    There was smoke, at a twentieth opacity in a pale mauve, starting a metre
-    and a half above the flame tips — which is to say there was no smoke, and
-    its absence is a large part of why the fire read as an icon pasted on the
-    grass rather than as something burning. Dark blue-grey rather than black,
-    low opacity, and it now starts at the tips.
-  */
-  const SMOKE = 9
-  const smokeMats = useMemo(
-    () => Array.from({ length: SMOKE }, (_, i) => makeSmokeMaterial(i * 4.3, '#2b3450', 0.085)),
-    []
-  )
+  // A single broad version of the torch plume. Its shader already contains
+  // eight staggered buoyant injections, so one mesh yields connected curls
+  // without parallel columns or a stack of obvious smoke cards.
+  const smokeMat = useMemo(() => makeTorchSmokeMaterial(21.7, '#78818b', 0.14), [])
 
   useLayoutEffect(
     () => () => {
       glowTex.dispose()
       for (const m of flameMats) m.dispose()
-      for (const m of smokeMats) m.dispose()
+      smokeMat.dispose()
     },
-    [glowTex, flameMats, smokeMats]
+    [glowTex, flameMats, smokeMat]
   )
 
-  const SPARKS = 70
+  const SPARKS = 42
   const sparkSeeds = useMemo(() => {
     const r = rng(303)
     return Array.from({ length: SPARKS }, () => ({
@@ -1820,17 +2195,6 @@ export function Campfire({
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SPARKS * 3), 3))
     return g
-  }, [])
-
-  const smokePuffs = useMemo(() => {
-    const r = rng(717)
-    return Array.from({ length: SMOKE }, (_, i) => ({
-      offset: i / SMOKE,
-      speed: 0.062 + r() * 0.04,
-      drift: 0.35 + r() * 1.05,
-      spin: (r() - 0.5) * 0.5,
-      size: 0.55 + r() * 0.4,
-    }))
   }, [])
 
   useFrame((state) => {
@@ -1856,33 +2220,25 @@ export function Campfire({
     }
 
     if (flames.current) {
-      flames.current.children.forEach((child, i) => {
-        const mesh = child as THREE.Mesh
-        // Gusts: a slow envelope over a fast wobble, so the whole fire leans
-        // one way for a beat instead of jittering in place.
+      const children = flames.current.children
+      for (let i = 0; i < children.length; i++) {
+        const tongue = children[i] as THREE.Group
+        // Scale and lean around the base pivot, so the contact point stays
+        // planted between the logs. The shader supplies the faster internal
+        // distortion; this transform only gives the silhouette a slow breath.
         const gust = Math.sin(t * 0.37 + i * 0.4) * 0.5 + Math.sin(t * 0.13) * 0.35
-        const sy = 0.92 + Math.sin(t * (5.1 + i * 1.6) + i * 2.3) * 0.11 + flicker * 0.08
-        mesh.scale.set(1, sy, 1)
-        mesh.rotation.z = gust * 0.13 + Math.sin(t * (2.6 + i) + i) * 0.05
-        mesh.position.x = gust * 0.06 * (1 + i * 0.2)
-      })
-    }
-
-    if (core.current) {
-      const m = core.current.material as THREE.MeshBasicMaterial
-      // VISUAL-13.4 (2026-08-30): 0.50 -> 0.33. With a taller flame in front of
-      // it the core cleared the bloom threshold over a much larger area and the
-      // middle of the fire went to flat white, which is the one thing the core
-      // is not supposed to do to the silhouette.
-      m.opacity = 0.33 * flicker
-      core.current.scale.setScalar(0.9 + flicker * 0.22)
-      core.current.quaternion.copy(camera.quaternion)
+        const sy = 0.98 + Math.sin(t * (4.5 + i * 0.9) + i * 2.3) * 0.035 + (flicker - 0.8) * 0.035
+        tongue.scale.set(1, sy, 1)
+        tongue.rotation.z = gust * (i >= 2 ? 0.018 : 0.03)
+      }
     }
 
     const sp = sparks.current
     if (sp) {
       const pos = sparkGeo.getAttribute('position') as THREE.BufferAttribute
-      sparkSeeds.forEach((s, i) => {
+      const positions = pos.array as Float32Array
+      for (let i = 0; i < sparkSeeds.length; i++) {
+        const s = sparkSeeds[i]
         const life = (t * s.speed * 0.26 + s.offset) % 1
         /*
           VISUAL-13.3 (2026-08-30): rise 0.25 + life * 5.2 -> 0.25 + rise * 2.4,
@@ -1897,49 +2253,33 @@ export function Campfire({
           dies inside two and a half units of the fire.
         */
         const rise = Math.pow(life, 0.62)
-        const y = 0.25 + rise * 2.4
-        const spread = s.rad + rise * 0.62
-        pos.setXYZ(
-          i,
-          Math.cos(s.a + life * 2.4) * spread + s.drift * rise * 0.5,
-          y,
-          Math.sin(s.a + life * 2.4) * spread
-        )
-      })
+        const y = 0.25 + rise * 1.9
+        const spread = s.rad + rise * 0.48
+        const offset = i * 3
+        positions[offset] =
+          Math.cos(s.a + life * 2.4) * spread + s.drift * rise * 0.5
+        positions[offset + 1] = y
+        positions[offset + 2] = Math.sin(s.a + life * 2.4) * spread
+      }
       pos.needsUpdate = true
       // Fades out as the column tops out rather than being cut off at full
       // brightness — a hard-edged loop is what makes a spark system read as a
       // texture rather than as fire.
-      ;(sp.material as THREE.PointsMaterial).opacity = 0.85 + Math.sin(t * 8) * 0.12
+      ;(sp.material as THREE.PointsMaterial).opacity = 0.62 + Math.sin(t * 8) * 0.1
     }
 
     if (smokeGroup.current) {
-      smokeGroup.current.children.forEach((child, i) => {
-        const puff = smokePuffs[i]
-        const mesh = child as THREE.Mesh
-        const life = (t * puff.speed + puff.offset) % 1
-        // Starts above the flame tips: smoke drawn over the fire hides the one
-        // thing the fire is for.
-        // VISUAL-13.2 (2026-08-30): base 1.55 -> 1.15, rise 7.5 -> 8.4, and the
-        // puff expands further over its life (0.5 + life * 2.2 -> 0.42 + life *
-        // 2.1). Smoke that does not grow as it climbs reads as a rising sprite.
-        mesh.position.set(
-          puff.drift * life * life * 3.2,
-          1.15 + life * 8.4,
-          puff.drift * life * 0.6
-        )
-        mesh.scale.setScalar(puff.size * (0.42 + life * 2.1))
+      const mesh = smokeGroup.current.children[0] as THREE.Mesh | undefined
+      if (mesh) {
         mesh.quaternion.copy(camera.quaternion)
-        mesh.rotateZ(t * puff.spin + puff.offset * 6)
-        const mat = mesh.material as THREE.ShaderMaterial
-        mat.uniforms.uTime.value = t
-        mat.uniforms.uLife.value = life
-      })
+        smokeMat.uniforms.uTime.value = t
+        smokeMat.uniforms.uOpacity.value = 0.14
+      }
     }
 
     if (groundGlow.current) {
       const m = groundGlow.current.material as THREE.MeshBasicMaterial
-      m.opacity = 0.30 * flicker
+      m.opacity = 0.1 * flicker
       groundGlow.current.scale.setScalar(1 + Math.sin(t * 3.7) * 0.03)
     }
   })
@@ -1952,7 +2292,7 @@ export function Campfire({
           light.current = l
           if (lightRef) lightRef.current = l
         }}
-        position={[0, 0.75, 0]}
+        position={[0, 1.12, 0]}
         color={FIRELIGHT.key.color}
         intensity={FIRELIGHT.key.intensity}
         distance={FIRELIGHT.key.distance}
@@ -1965,39 +2305,17 @@ export function Campfire({
         shadow-camera-far={FIRELIGHT.key.distance}
       />
 
-      {/* Hot core sitting in the coals.
-          LIGHTING-REWORK (2026-08-17): opacity 0.38->0.50. This quad is
-          `toneMapped={false}`, additive — see
-          [[portfolio-post-chain-tonemapping]] — so it clamps at 1.0 whatever
-          value is written under it, and the visible brightness of the flame
-          core comes from how much of it clears the Bloom threshold, not from
-          this multiply. Raising the point light intensity (above) did not
-          move imagestats' r=0.03 sample at all, because this quad is what
-          that sample was reading, not the lit surfaces around it. */}
-      <mesh ref={core} position={[0, 0.28, 0]}>
-        <planeGeometry args={[1.15, 1.15]} />
-        <meshBasicMaterial
-          map={glowTex}
-          transparent
-          opacity={0.50}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          toneMapped={false}
-          fog={false}
-        />
-      </mesh>
-
       {/* Pool of light on the ground under the fire. Wider than the lit disc
           of bare earth, so the glow runs out into the grass instead of stopping
           exactly where the ground texture changes.
           LIGHTING-REWORK (2026-08-17): opacity 0.22->0.30, same reasoning as
           the core quad above. */}
       <mesh ref={groundGlow} rotation-x={-Math.PI / 2} position={[0, 0.04, 0]}>
-        <planeGeometry args={[9, 9]} />
+        <planeGeometry args={[12.5, 12.5]} />
         <meshBasicMaterial
           map={glowTex}
           transparent
-          opacity={0.22}
+          opacity={0.055}
           depthWrite={false}
           blending={THREE.AdditiveBlending}
           toneMapped={false}
@@ -2016,25 +2334,23 @@ export function Campfire({
         of the benches behind it and throws a warm pool that goes all the way to
         the edge of the burn.
       */}
-      <group ref={flames} scale={[1.24, 1.34, 1.24]} position={[0, 0.05, 0]}>
-        {flameMats.map((mat, i) => (
-          <mesh
-            key={i}
-            material={mat}
-            rotation-y={(i * Math.PI) / 3}
-            position={[0, 0.72 - i * 0.06, 0]}
-          >
-            {/* Sized to the wood, not to the frame: a 2m flame over a 1m fire
-                pit reads as a bonfire and swallows the middle tent. */}
-            <planeGeometry args={[1.15 - i * 0.14, 1.5 - i * 0.13]} />
-          </mesh>
-        ))}
+      <group ref={flames} scale={[1.18, 1.3, 1.18]} position={[0, 0.14, 0]}>
+        {flameMats.map((mat, i) => {
+          const layer = CAMPFIRE_LAYERS[i]
+          return (
+            <group key={i}>
+              <mesh material={mat} position-y={layer.h / 2} renderOrder={layer.order}>
+                <planeGeometry args={[layer.w, layer.h]} />
+              </mesh>
+            </group>
+          )
+        })}
       </group>
 
       <points ref={sparks} geometry={sparkGeo} frustumCulled={false}>
         <pointsMaterial
           map={glowTex}
-          size={0.15}
+          size={0.11}
           sizeAttenuation
           transparent
           depthWrite={false}
@@ -2046,11 +2362,9 @@ export function Campfire({
       </points>
 
       <group ref={smokeGroup}>
-        {smokeMats.map((mat, i) => (
-          <mesh key={i} material={mat} position={[0, 1.9, 0]}>
-            <planeGeometry args={[1.8, 1.8]} />
-          </mesh>
-        ))}
+        <mesh material={smokeMat} position={[0, 3.0, -0.05]} renderOrder={0}>
+          <planeGeometry args={[2.5, 3.0]} />
+        </mesh>
       </group>
     </group>
   )
@@ -2065,32 +2379,36 @@ const _flameTarget = /* @__PURE__ */ new THREE.Vector3()
 const _flameLookMat = /* @__PURE__ */ new THREE.Matrix4()
 const _flameWorldQuat = /* @__PURE__ */ new THREE.Quaternion()
 const _flameParentQuat = /* @__PURE__ */ new THREE.Quaternion()
+const TORCH_SPARKS = 12
 
 export function TorchFlame({
   position,
   seed = 0,
   scale = 1,
+  heightScale = 1,
   light = FIRELIGHT.torch.intensity,
   reach = FIRELIGHT.torch.reach,
   strength = 1,
+  brightness = 1,
+  depthTest = true,
   lit = true,
   hasLight = true,
   gain,
   smoke = false,
   single = false,
+  extras = true,
 }: {
   position: [number, number, number]
   seed?: number
   /** Shrinks the whole flame. A candle is the same fire, a quarter the size. */
   scale?: number
+  /** Vertical-only trim for flames enclosed by short lantern glass. */
+  heightScale?: number
   light?: number
   reach?: number
   /**
-   * A thin drifting thread above the tip, camera-facing. Off by default — six
-   * torches and two candles a tent all trailing smoke would be a lot of extra
-   * overdraw for something that reads, at torch scale outdoors, as barely
-   * more than the flame's own shimmer. Candles are close to the lens and
-   * still, which is exactly where a curl of smoke is legible.
+   * Outdoor torches use one continuous, softly distorted smoke plume.
+   * `single` flames retain the thin thread intended for a candle wick.
    */
   smoke?: boolean
   /**
@@ -2104,6 +2422,8 @@ export function TorchFlame({
    * frame, is what a flame this size actually looks like.
    */
   single?: boolean
+  /** Sparks and the painted ground pool around an outdoor torch. */
+  extras?: boolean
   /**
    * Per-frame multiplier on the light only, read from a ref.
    *
@@ -2118,6 +2438,10 @@ export function TorchFlame({
    * saturates, and the bloom pass turns the result into a headlamp.
    */
   strength?: number
+  /** Flame shader radiance; opacity remains controlled separately by strength. */
+  brightness?: number
+  /** Disable only for a flame enclosed by opaque decorative geometry. */
+  depthTest?: boolean
   /**
    * Whether this flame owns a point light **at all**.
    *
@@ -2149,6 +2473,8 @@ export function TorchFlame({
   const { camera } = useThree()
   const lamp = useRef<THREE.PointLight>(null)
   const group = useRef<THREE.Group>(null)
+  const flameMeshes = useRef<THREE.Group>(null)
+  const sparks = useRef<THREE.Points>(null)
   const smokeMesh = useRef<THREE.Mesh>(null)
 
   // A shared time base scaled by a fixed 1.35 and offset by seed alone just
@@ -2159,11 +2485,42 @@ export function TorchFlame({
   // they can't re-align no matter how long the scene runs.
   const flickRate = useMemo(() => 1.35 + (rng(Math.floor(seed * 97) + 1)() - 0.5) * 0.16, [seed])
 
+  // The campfire's exact spark seed fields, with only its emission radius
+  // reduced to fit a torch basket. A seed unique to each torch prevents the
+  // small ember bursts from lining up across the campsite.
+  const sparkSeeds = useMemo(() => {
+    const r = rng(303 + Math.floor(seed * 997))
+    return Array.from({ length: TORCH_SPARKS }, () => ({
+      a: r() * Math.PI * 2,
+      rad: r() * 0.055,
+      speed: 0.45 + r() * 1.5,
+      offset: r(),
+      drift: (r() - 0.5) * 0.22,
+    }))
+  }, [seed])
+
+  const sparkGeo = useMemo(() => {
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TORCH_SPARKS * 3), 3))
+    return geometry
+  }, [])
+  useLayoutEffect(() => () => sparkGeo.dispose(), [sparkGeo])
+
   const smokeMat = useMemo(
-    () => (smoke ? makeSmokeLineMaterial(seed, '#d3c9db', 0.34) : null),
-    [smoke, seed]
+    () => (smoke && single ? makeSmokeLineMaterial(seed, '#778086', 0.16) : null),
+    [smoke, seed, single]
   )
-  useLayoutEffect(() => () => smokeMat?.dispose(), [smokeMat])
+  const torchSmokeMat = useMemo(
+    () => (smoke && !single ? makeTorchSmokeMaterial(seed, '#78818b', 0.145) : null),
+    [smoke, seed, single]
+  )
+  useLayoutEffect(
+    () => () => {
+      smokeMat?.dispose()
+      torchSmokeMat?.dispose()
+    },
+    [smokeMat, torchSmokeMat]
+  )
 
   // LIGHTING-REWORK (2026-08-17, item e): torches had a point light but no
   // ground pool of their own — the campfire's groundGlow quad has no
@@ -2182,6 +2539,7 @@ export function TorchFlame({
               detail: 2.6,
               rise: 2.6,
               opacity: 0.72 * strength,
+              brightness,
               core: '#ffdf9a',
               mid: '#ff8c14',
             }),
@@ -2191,21 +2549,49 @@ export function TorchFlame({
               seed,
               detail: 2.2,
               rise: 2.4,
-              opacity: 0.62 * strength,
-              core: '#ffdf9a',
-              mid: '#ff8c14',
+              opacity: 0.74 * strength,
+              brightness,
+              core: '#ffd18f',
+              mid: '#ef821b',
             }),
             makeFlameMaterial({
               seed: seed + 4.1,
               detail: 2.9,
               rise: 3.1,
-              opacity: 0.42 * strength,
-              core: '#ffd27e',
-              mid: '#ff7a0c',
+              opacity: 0.46 * strength,
+              brightness,
+              core: '#ffc875',
+              mid: '#e96f10',
+            }),
+            // A broader, faint outer silhouette behind the two existing
+            // tongues. It carries the darker orange edge of the fire without
+            // adding another bright core or turning into a glow ball.
+            makeFlameMaterial({
+              seed: seed + 8.6,
+              detail: 1.8,
+              rise: 1.9,
+              opacity: 0.18 * strength,
+              brightness,
+              core: '#ffad54',
+              mid: '#d95a0d',
+              edge: '#761606',
+            }),
+            // Outermost envelope: wider than the first faint shell and less
+            // opaque, so it reads as low-density flame rather than a halo.
+            makeFlameMaterial({
+              seed: seed + 12.8,
+              detail: 1.45,
+              rise: 1.6,
+              opacity: 0.085 * strength,
+              brightness,
+              core: '#f48a31',
+              mid: '#b83b08',
+              edge: '#581005',
             }),
           ],
-    [seed, strength, single]
+    [seed, strength, brightness, single]
   )
+  for (const material of mats) material.depthTest = depthTest
   useLayoutEffect(() => () => mats.forEach((m) => m.dispose()), [mats])
 
   useFrame((state) => {
@@ -2220,8 +2606,8 @@ export function TorchFlame({
       lamp.current.intensity = lit ? light * flick * (gain ? gain.current : 1) : 0
     }
     if (group.current) {
-      group.current.scale.set(scale, scale * (0.92 + flick * 0.16), scale)
       if (single) {
+        group.current.scale.set(scale, scale * heightScale * (0.92 + flick * 0.16), scale)
         // Turned to the lens rather than swayed in place — see `single`. No
         // rotateZ sway here: a rigid rock reads as a pendulum, not a flame,
         // at candle scale where the whole plane is a few pixels wide. What
@@ -2247,8 +2633,48 @@ export function TorchFlame({
           group.current.quaternion.copy(_flameWorldQuat)
         }
       } else {
-        group.current.rotation.z = Math.sin(t * 2.4 + seed) * 0.08
+        group.current.scale.set(scale, scale * heightScale, scale)
+        group.current.rotation.set(0, 0, 0)
+
+        // Keep the campfire's independent height variation, while leaving the
+        // physical quads upright. Rotating a crossed flame card exposes its
+        // edge and makes the fire appear to turn away from the viewer; the
+        // flame shader already bends only the upper silhouette internally.
+        const children = flameMeshes.current?.children
+        if (children) for (let i = 0; i < children.length; i++) {
+          // Each child is a pivot located at the wick, so height changes leave
+          // the bottom centred in the basket.
+          const tongue = children[i] as THREE.Group
+          const sy =
+            0.98 +
+            Math.sin(t * (5.1 + i * 1.6) + seed + i * 2.3) * 0.012 +
+            flick * 0.02
+          tongue.scale.set(1, sy, 1)
+          tongue.rotation.z = 0
+        }
       }
+    }
+
+    // Campfire spark motion copied directly and scaled to the torch: the same
+    // eased rise, spiral, drift, looping lifetime, and breathing opacity.
+    const sparkPoints = sparks.current
+    if (sparkPoints && !single && extras) {
+      const pos = sparkGeo.getAttribute('position') as THREE.BufferAttribute
+      const positions = pos.array as Float32Array
+      for (let i = 0; i < sparkSeeds.length; i++) {
+        const spark = sparkSeeds[i]
+        const life = (t * spark.speed * 0.26 + spark.offset) % 1
+        const rise = Math.pow(life, 0.62)
+        const y = 0.08 + rise * 0.72
+        const spread = spark.rad + rise * 0.11
+        const offset = i * 3
+        positions[offset] =
+          Math.cos(spark.a + life * 2.4) * spread + spark.drift * rise * 0.5
+        positions[offset + 1] = y
+        positions[offset + 2] = Math.sin(spark.a + life * 2.4) * spread
+      }
+      pos.needsUpdate = true
+      ;(sparkPoints.material as THREE.PointsMaterial).opacity = lit ? 0.68 + Math.sin(t * 8 + seed) * 0.12 : 0
     }
     if (smokeMat) {
       // Loops on its own slow clock rather than drifting anywhere — a single
@@ -2257,23 +2683,36 @@ export function TorchFlame({
       smokeMat.uniforms.uTime.value = t
       smokeMat.uniforms.uLife.value = life
     }
+    if (torchSmokeMat && smokeMesh.current && !single) {
+      torchSmokeMat.uniforms.uTime.value = t
+      torchSmokeMat.uniforms.uOpacity.value = lit ? 0.145 : 0
+      smokeMesh.current.visible = lit
+      smokeMesh.current.quaternion.copy(camera.quaternion)
+    }
     if (groundGlow.current) {
       const m = groundGlow.current.material as THREE.MeshBasicMaterial
-      m.opacity = 0.30 * flick * (lit ? (gain ? gain.current : 1) : 0)
+      m.opacity = 0.07 * flick * (lit ? (gain ? gain.current : 1) : 0)
     }
   })
 
   return (
     <group position={position}>
       <group ref={group}>
-        {mats.map((mat, i) => {
-          const h = 0.66 - i * 0.11
-          return (
-            <mesh key={i} material={mat} rotation-y={single ? 0 : i * (Math.PI / 2)} position={[0, h / 2, 0]}>
-              <planeGeometry args={[0.22 - i * 0.05, h]} />
-            </mesh>
-          )
-        })}
+        <group ref={flameMeshes}>
+          {mats.map((mat, i) => {
+            const h = single ? 0.66 : [0.66, 0.55, 0.74, 0.82][i]
+            const width = single ? 0.22 : [0.22, 0.17, 0.3, 0.42][i]
+            const rotationY = single ? 0 : [0, Math.PI / 2, Math.PI / 4, 0][i]
+            const renderOrder = single ? 0 : [2, 3, 1, 0][i]
+            return (
+              <group key={i} rotation-y={rotationY}>
+                <mesh material={mat} position={[0, h / 2, 0]} renderOrder={renderOrder}>
+                  <planeGeometry args={[width, h]} />
+                </mesh>
+              </group>
+            )
+          })}
+        </group>
         {/* Nested in the same billboarded, scaled group as the flame planes —
             not a sibling with its own transform — so it tracks the candle's
             own angle instead of drifting off in the parent's unbillboarded
@@ -2285,6 +2724,26 @@ export function TorchFlame({
           </mesh>
         )}
       </group>
+      {!single && extras && (
+        <points ref={sparks} geometry={sparkGeo} frustumCulled={false}>
+          <pointsMaterial
+            map={getTorchGlowTex()}
+            size={0.045}
+            sizeAttenuation
+            transparent
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+            toneMapped={false}
+            fog={false}
+            color="#ffb347"
+          />
+        </points>
+      )}
+      {smoke && !single && torchSmokeMat && (
+        <mesh ref={smokeMesh} material={torchSmokeMat} position={[0, 1.52, 0]}>
+          <planeGeometry args={[1.4, 1.92]} />
+        </mesh>
+      )}
       {hasLight && (
         <pointLight
           ref={lamp}
@@ -2303,16 +2762,16 @@ export function TorchFlame({
       {/* This group is offset to the flame's own height (`position` prop —
           1.66 for a torch), so the pool's local y has to cancel that back
           out to land on the ground rather than float at flame height. */}
-      {!single && (
+      {!single && extras && (
         <mesh ref={groundGlow} rotation-x={-Math.PI / 2} position={[0, 0.03 - position[1], 0]}>
-          <planeGeometry args={[2.3, 2.3]} />
+          <planeGeometry args={[3.3, 3.3]} />
           <meshBasicMaterial
             map={getTorchGlowTex()}
             transparent
-            opacity={0.3}
+            opacity={0.07}
             depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            toneMapped={false}
+            blending={THREE.NormalBlending}
+            toneMapped
             fog={false}
           />
         </mesh>

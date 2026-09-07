@@ -69,10 +69,10 @@ export class SplitToneEffect extends Effect {
     // averages against the new target reference showed the current frame's
     // dark end reading warmer than target at the same luminance (item a).
     // See LIGHTING_TUNING.md.
-    shadow = new THREE.Color('#2748c8'),
-    highlight = new THREE.Color('#ff9a3c'),
-    shadowAmount = 0.065,
-    highlightAmount = 0.06,
+    shadow = new THREE.Color('#28545a'),
+    highlight = new THREE.Color('#f39a4b'),
+    shadowAmount = 0.018,
+    highlightAmount = 0.038,
   }: SplitToneOptions = {}) {
     super('SplitToneEffect', FRAG, {
       blendFunction: BlendFunction.NORMAL,

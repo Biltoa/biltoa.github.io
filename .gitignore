@@ -4,9 +4,23 @@ dist-ssr
 *.local
 .DS_Store
 .vite
+*.tsbuildinfo
 
-# Unity WebGL builds are big — keep them out of git unless you use LFS.
-public/unity/Build/
-
-# Headless captures from tools/shot.mjs — working files for art passes.
+# Local output and inspection artifacts.
+tmp/
+output/
+github-release/
+tools/**/*.log
 tools/shots/
+tools/compare/
+tools/bench/
+tools/ref/
+tools/source/
+tools/build/
+tools/**/*.blend
+tools/**/*.blend1
+
+# GitHub rejects regular Git objects over 100 MiB and Git LFS cannot serve
+# GitHub Pages sites. The Pages workflow downloads this one large Unity payload
+# from the `unity-webgl-v1` GitHub Release before building the deploy artifact.
+public/unity/Build/WebGL.data.unityweb

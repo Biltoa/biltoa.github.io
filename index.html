@@ -17,40 +17,49 @@
     />
     <meta property="og:type" content="website" />
     <!--
-      The campsite kit is 2.7MB and it is the long pole in the load: nothing on
-      the landing page can be drawn until it is parsed. Starting the fetch from
-      the markup means it downloads *while* the three.js and React chunks are
-      still being fetched and parsed, rather than after — the network and the
-      main thread are different resources and there is no reason to use them one
-      at a time. `crossorigin` is required for the preload to match the request
-      three's FileLoader actually makes; without it the file is fetched twice.
+      Only the landing route owns the 3D camp. Create its preload hints here,
+      before the app module, but do not make a direct /projects/* visit download
+      megabytes of camp assets it will never display. Every hinted URL matches
+      the eventual loader request exactly, including CORS mode and cache-buster.
     -->
-    <link rel="preload" href="/models/campsite-kit.glb" as="fetch" crossorigin="anonymous" />
-
-    <!--
-      Same argument for the scene's textures, which were not even *requested*
-      until the hero chunk had parsed and mounted — about a second in, on a
-      warm local connection, and correspondingly worse on a real one. They are
-      loaded through three's ImageLoader, which sets crossOrigin to anonymous,
-      so these have to as well or each one is downloaded twice.
-    -->
-    <link rel="preload" href="/textures/T_AutumnGrass_01_C.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_AutumnGrass_01_N.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_Dirt_Ground_C.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_Dirt_Ground_N.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_Tree_Campsite_01_Billboard.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_Tree_Campsite_02_Billboard.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_Tree_Campsite_03_Billboard.webp" as="image" crossorigin="anonymous" />
-    <link rel="preload" href="/textures/T_Tree_Campsite_04_Billboard.webp" as="image" crossorigin="anonymous" />
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Archivo+Black&family=EB+Garamond:ital,wght@0,400..800;1,400..600&family=Inter:wght@300..800&family=JetBrains+Mono:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
+    <script>
+      if (location.pathname === '/' || location.pathname === '/index.html') {
+        const hints = [
+          ['/models/tent-painted-blue-final.glb?v=4', 'fetch'],
+          ['/models/campsite-kit.glb?v=2', 'fetch'],
+          ['/models/bench-setups.glb', 'fetch'],
+          ['/draco/draco_wasm_wrapper.js', 'fetch'],
+          ['/draco/draco_decoder.wasm', 'fetch', 'application/wasm'],
+          ['/textures/tent-cloth/fabric030-neutral/Fabric030_Packed.webp', 'image'],
+          ['/textures/T_Dirt_Ground_C.webp', 'image'],
+          ['/textures/T_Dirt_Ground_N.webp', 'image'],
+          ['/fonts/archivo-latin-var.woff2', 'font', 'font/woff2'],
+          ['/fonts/archivo-black-latin.woff2', 'font', 'font/woff2'],
+          ['/fonts/eb-garamond-latin-var.woff2', 'font', 'font/woff2'],
+          ['/fonts/eb-garamond-italic-latin-var.woff2', 'font', 'font/woff2'],
+          ['/fonts/jetbrains-mono-latin-var.woff2', 'font', 'font/woff2'],
+        ]
+        for (const [href, as, type] of hints) {
+          const link = document.createElement('link')
+          link.rel = 'preload'
+          link.href = href
+          link.as = as
+          link.crossOrigin = 'anonymous'
+          if (type) link.type = type
+          document.head.append(link)
+        }
+      }
+    </script>
   </head>
   <body>
+    <script>
+      const redirect = sessionStorage.getItem('spa-redirect')
+      if (redirect) {
+        sessionStorage.removeItem('spa-redirect')
+        const target = new URL(redirect)
+        history.replaceState(null, '', target.pathname + target.search + target.hash)
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

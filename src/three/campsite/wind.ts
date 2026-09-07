@@ -19,7 +19,6 @@ interface FoliageShader {
   uniforms: {
     uWindTime: { value: number }
     uFireFlicker?: { value: number }
-    uFirePos?: { value: THREE.Vector3 }
     uWarmCount?: { value: number }
   }
 }
@@ -242,7 +241,6 @@ export function applyWind(material: THREE.Material, opts: WindOptions = {}) {
     shader.uniforms.uWindSpeed = { value: speed }
     shader.uniforms.uWindHeight = { value: height }
     shader.uniforms.uFireFlicker = { value: 1 }
-    shader.uniforms.uFirePos = { value: new THREE.Vector3() }
     shader.uniforms.uFireColor = { value: warmColor }
     shader.uniforms.uTipTint = { value: tipTint }
     shader.uniforms.uRootTint = { value: rootTint }
@@ -527,11 +525,10 @@ export function applyWind(material: THREE.Material, opts: WindOptions = {}) {
 }
 
 /** Called once per frame from the scene. */
-export function tickWind(elapsed: number, fireFlicker = 1, firePos?: THREE.Vector3) {
+export function tickWind(elapsed: number, fireFlicker = 1) {
   for (const shader of patched) {
     shader.uniforms.uWindTime.value = elapsed
     if (shader.uniforms.uFireFlicker) shader.uniforms.uFireFlicker.value = fireFlicker
-    if (shader.uniforms.uFirePos && firePos) shader.uniforms.uFirePos.value.copy(firePos)
   }
 }
 

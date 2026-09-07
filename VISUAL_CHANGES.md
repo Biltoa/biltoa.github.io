@@ -424,17 +424,12 @@ is not a change worth the risk.
 
 ## INCOMPLETE
 
-**13.7 — rope geometry.** Only the colour and material are fixed. The ropes are
-baked into the tent mesh's second primitive (`Tent_1`, 469 vertices) together
-with the frame and the stakes, in `public/models/campsite-kit.glb`; they cannot
-be separated, thickened, given a catenary sag, or handed a twisted-fibre normal
-map without re-authoring the model. **To finish:** split the rope faces onto
-their own material slot in the Blender export (`tools/export-campsite.py`
-already does exactly this kind of split — see its `mark_faces_by_bbox`, which is
-how the window sash got its own slot), then hide that slot and rebuild the ropes
-as `TubeGeometry` along a `CatmullRomCurve3` with a sag term, 2–3× the current
-radius, on a `MeshStandardMaterial`. Small angled wooden stakes at each ground
-anchor would be new geometry either way.
+**13.7 — rope geometry — completed 2026-08-31.** Blender inspection found the
+eight actual guy ropes as disconnected 10-vertex / 5-face ribbons inside the
+source FBX. `tools/export-campsite.py` now identifies those islands, widens them
+1.75× across their PCA short axis without moving their anchors or changing their
+length/sag, and assigns them to a dedicated matte brown `Tent_2` material. No
+runtime replacement lines remain.
 
 **13.8 — canopy silhouettes.** The wood now has the right values, the right
 number of colours and a real depth ramp, and it reads as a stand rather than as
@@ -482,3 +477,124 @@ difference from a camera difference needed both. Read by `tools/qa/cam.mjs` and
 
 **New files.** `tools/qa/click-tents.mjs`, `tools/qa/cam.mjs`,
 `tools/qa/measure.cjs`, and this document.
+
+---
+
+## CAMPFIRE ART PASS — 2026-08-30
+
+This pass supersedes the earlier `INCOMPLETE` notes for the visible tent ropes
+and path surfaces. A verified pre-edit copy of the project is at
+`E:\Portfolio Project Backup_2026-08-30_212532`.
+
+### Protected work
+
+No Unity WebGL files, journal/book implementation, UI, or night-sky geometry and
+shaders were changed. The moon, stars, aurora and skybox remain the existing
+implementation.
+
+### Scene work
+
+- Rebalanced moon, hemisphere, ambient and rim light so the camp stays readable
+  as night without the former red/black crush.
+- Rebuilt the campfire and torch balance around warm, bounded light pools;
+  reduced the white core, expanded the visible campfire, and refined flame,
+  glow, spark and smoke layers.
+- Added textured worn-earth paths and tent pads from the existing dirt maps,
+  enlarged the central clearing, and retuned grass/tree colour and warm spill.
+- Re-authored the eight real rope ribbons in the source tent during the Blender
+  export: 1.75× wider across the short axis and assigned to a dedicated matte
+  beige-brown material. The previous floating `TubeGeometry` overlays are gone.
+- Raised and tilted the lobby camera so the campfire and blue tent share the
+  centre line with clear separation.
+- Retuned bloom, saturation, contrast and vignette for a restrained teal/green
+  moonlight and amber firelight palette.
+
+### Verification
+
+- `npm run build` — pass (639 modules).
+- `node tools/qa/click-tents.mjs` — all three tents open and reach their camera
+  positions.
+- Fixed captures checked at 1280×720, 1774×887 and 2048×1024.
+- Final desktop capture: `tools/shots/codex-final-candidate.png`.
+
+---
+
+## CAMPSITE SECOND PASS — 2026-08-31
+
+A full pre-edit copy was verified at
+`E:\Portfolio Project Backup_2026-08-31_second-pass` (17,796 files,
+1,867,491,338 bytes in both source and backup).
+
+### Protected scope
+
+- No Unity WebGL build files or book contents were changed.
+- No skybox, aurora, moon, star, or night-sky shader was changed.
+- Existing navigation and portfolio UI remain intact. The temporary tent-study
+  panel and all five study variants have now been removed.
+
+### Asset and scene work
+
+- Removed the synthetic floating rope overlay and rebuilt the actual tent GLB
+  from Blender with wider, brown rope islands on their own material slot.
+- Replaced the green substrate outside the grass blades with tiled neutral soil,
+  while retaining the authored worn clearing, paths, and tent pads.
+- Rebuilt all three closed journal exteriors as distinct but related camp books:
+  wine leather field notes, navy cloth play-systems volume, and a bronze/copper
+  tools ledger. All stamps and rules are painted in one centered title-plate
+  coordinate system. Page content is untouched.
+- Upscaled and sharpened the indoor bench normal and roughness maps to 2048px;
+  the existing 2048px colour map is preserved.
+- Changed procedural fire tongues from additive stacking to tone-mapped alpha
+  compositing, reduced the glow cards, shortened sparks, added lighter drifting
+  torch smoke, and broke campfire smoke into a small wind-bent plume that does
+  not cover the middle tent.
+- Replaced the five-way tent study with the supplied Meshy canvas A-frame GLB as
+  the single shell used by all three tents. Geometry and transforms remain
+  shared; only the three canvas material instances differ in base colour.
+- Squared the middle tent to yaw `0` and added a shared matte plain-weave surface
+  under `public/textures/tent-cloth/`. Meshy's atlas UV islands visibly broke
+  the pattern, so the shader now projects it in object space with triplanar
+  blending. About uses exact sRGB `#70745A`, Gameplay `#9A896C`, and Projects
+  `#394A53`; all three share roughness `0.93`, metalness `0`, environment
+  response `0.35`, AO intensity `0.75`, woven relief strength `0.20`, subtle
+  tonal variation, and lower-edge weathering.
+- Neutralized the authored orange pole bake into one exact `#5B3B29` weathered
+  wood base at roughness `0.82`, retaining its grain and normal detail. The
+  exterior canvas has no idle emission. A short-range amber point light and
+  warm doorway pool provide localized interior warmth while the existing moon,
+  aurora and torches remain responsible for the exterior response.
+- Re-authored the A-frame in Blender into `AFrame_Cloth` and `AFrame_Wood`
+  primitives. This removes isolated orange bake fragments that appeared as
+  dots, cuts, and scratches on the canvas; the cloth primitive is now fully
+  disconnected from Meshy's contaminated colour/normal/roughness atlases.
+- Repaired the remaining entrance-boundary defects in the exported mesh. Four
+  narrow faces that were incorrectly classified as wood now use the canvas
+  material, and two recessed canvas seam underlays close the source model's
+  open inner edges without covering or changing the visible wooden poles.
+- Removed the right shelf and glassware plus the left backpack because both
+  intersected the shallower replacement shell.
+
+### Tent asset status
+
+The active shell is `public/models/canvas-cabin.glb`, derived from the supplied
+`Meshy_AI_Canvas_A_Frame_Tent_0831100927_texture.glb` by
+`tools/split-aframe-materials.py`. Geometry and dimensions are unchanged; its
+single material was split face-by-face into cloth and wood primitives. The
+earlier procedural and Sketchfab-reference study options are no longer present
+in the application or UI.
+
+### Verification
+
+- `npm run typecheck` — pass.
+- `npm run build` — pass (639 modules).
+- `tools/qa/open-click.mjs` — closed journal opens, no console errors.
+- `tools/qa/click-tents.mjs 5175` — all three current tents reach their camera
+  destinations, no console errors.
+- `tools/probe-book.mjs` — first gameplay entry resolves to spread 1 and the
+  final tools entry resolves to spread 18; book contents remain interactive.
+- Fixed desktop captures checked for the supplied cabin in all three positions
+  and for all three closed book covers at 1774×887.
+- Tent PBR verification captures: `tools/shots/tent-pbr-final-lobby.png`,
+  `tools/shots/tent-pbr-final-middle.png`,
+  `tools/shots/tent-pbr-about-close-2.png`, and
+  `tools/shots/tent-pbr-projects-close.png`.

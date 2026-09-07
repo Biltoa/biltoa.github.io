@@ -1,19 +1,35 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber'
-import { Html, PerformanceMonitor, useProgress } from '@react-three/drei'
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { Canvas, useFrame, useLoader, useThree, type RootState } from '@react-three/fiber'
+import { Html, useGLTF, useProgress, useTexture } from '@react-three/drei'
 import {
   Bloom,
   BrightnessContrast,
   EffectComposer,
   HueSaturation,
+  Outline,
   ToneMapping,
   Vignette,
 } from '@react-three/postprocessing'
-import { ToneMappingMode } from 'postprocessing'
+import { KernelSize, ToneMappingMode, type OutlineEffect } from 'postprocessing'
 import * as THREE from 'three'
 import { clamp01, damp, easeInOutCubic, scrollDriver } from '../lib/scroll'
+import { GRAPHICS_DPR } from '../lib/graphics'
 import { sfxEnter, sfxExit, sfxHover, tickAudio } from '../lib/audio'
-import { tintParts, useKit, type Part } from './campsite/useKit'
+import {
+  ALL_STANDARD_MATERIALS,
+  collectParts,
+  TENT_MATERIALS,
+  tintParts,
+  useKit,
+} from './campsite/useKit'
 import {
   applyGroundGlow,
   AURORA_BOUNCE_HIGH,
@@ -22,18 +38,17 @@ import {
   setWarmLights,
   tickWind,
 } from './campsite/wind'
-import { makeOutlineShell } from './campsite/outline'
 import { applyParallax } from './campsite/parallax'
 import { installHeightFog } from './campsite/fog'
 import { fireFlicker } from './campsite/fire'
 import { SplitToneEffect } from './campsite/grade'
 import Book, { type PageScreenRect } from './campsite/Book'
+import { loadBookFonts, waitForBookImages } from './campsite/bookPaint'
 import {
   Campfire,
   FIRELIGHT,
   Fireflies,
   Haze,
-  Impostors,
   InstancedParts,
   Leaves,
   makeGlowTexture,
@@ -46,11 +61,12 @@ import {
 } from './campsite/Effects'
 import { debugEnabled, mountDebugPanel } from './campsite/debugPanel'
 import { attachDebugGain, GRASS_GAIN } from './campsite/debugGain'
+import { LANTERN_CANDLE_TOP_DROP, useBenchSetup } from './campsite/useBenchSetups'
 
 /* -------------------------------------------------------------------------- */
 /*  Night lighting, in one place.                                               */
 /*                                                                              */
-/*  Everything cold is here; everything warm is FIRELIGHT in Effects.tsx. The    */
+/*  Everything cold is here; everything warm is FIRELIGHT in Effects.tsx. The   */
 /*  whole rig is built round one relationship — a cool, dim, directional moon    */
 /*  against a warm, bright, local fire — and the single most common way to lose  */
 /*  it is to add a little more ambient until the shadows go grey. Ambient here   */
@@ -66,7 +82,7 @@ const NIGHT = {
   // four is a second key light, not a night sky, and it is half of why every
   // surface in the frame had the same value regardless of how far it was from
   // the fire. Cool and dimmer: the moon separates shapes, the fire lights them.
-  moon: { intensity: 2.6, color: '#c3d6ff' },
+  moon: { intensity: 3.05, color: '#b9d6ff' },
   /** Cool rim from behind and above, which is what separates tent from tree.
       LIGHTING-REWORK (2026-08-17): baked from ?debug — intensity 0.62->2,
       color '#5aa9ff'->'#ffffff'. */
@@ -76,7 +92,7 @@ const NIGHT = {
   // light against a convolution and a cube target, and on this scene the rim is
   // the only direction the curtain would have reached anyway. Teal, so tree
   // canopies, tent peaks and the tops of the grass take a green-cyan edge.
-  rim: { intensity: 1.2, color: '#5fd8c4' },
+  rim: { intensity: 0.92, color: '#69d2c7' },
   /**
    * Sky and ground bounce. Navy above, near-black below: a hemisphere light
    * with a lifted ground colour is exactly the grey-shadow failure mode.
@@ -109,11 +125,11 @@ const NIGHT = {
   // with no falloff and no shadow. That is a flat warm-grey wash over the whole
   // frame, and it is the single reason the camp read as evenly lit rather than
   // as a fire in a dark wood. Cyan-blue above, near-black blue below, and low.
-  hemisphere: { sky: '#2f93a8', ground: '#050a14', intensity: 0.34 },
+  hemisphere: { sky: '#789dbb', ground: '#131b23', intensity: 0.88 },
   /** The last resort against crushed black.
       LIGHTING-REWORK (2026-08-17): baked from ?debug, second pass — turned
       off (intensity 1->0) once the hemisphere alone was carrying enough. */
-  ambient: { intensity: 0, color: '#000000' },
+  ambient: { intensity: 0.48, color: '#6c89af' },
   /**
    * Depth haze. See campsite/fog.ts — this is height fog, not distance fog.
    *
@@ -130,7 +146,7 @@ const NIGHT = {
   // VISUAL-13.1d (2026-08-30): 1.02 -> 0.93. ACES and SRGB output were already
   // correct; the exposure was not, and a scene that is meant to be a night with
   // one fire in it should be sitting under the shoulder, not on it.
-  exposure: 0.93,
+  exposure: 1.05,
   /**
    * Radii the grass shader uses for its warm falloff. See wind.ts.
    *
@@ -151,17 +167,18 @@ const NIGHT = {
   // LIGHTING-REWORK (2026-08-17, revised): 4.3->4.8, paired with the
   // FIRELIGHT.key.distance revision above — same reasoning, mid-field was
   // undershooting the new target reference.
-  grassWarm: { fireRadius: 4.8, firePower: 1.1, torchRadius: 3.4, torchPower: 0.55 },
+  grassWarm: { fireRadius: 5.6, firePower: 0.72, torchRadius: 3.25, torchPower: 0.5 },
 } as const
 
 /**
- * How often the shadow map is re-rendered, in hertz.
+ * Maximum shadow-map refresh rate while a shadow caster is moving, in hertz.
  *
  * Not sixty. The only shadow caster in this scene that moves at all is a tent
  * bobbing a couple of centimetres as the scroll focus passes it, and a shadow
  * two frames stale at that amplitude is a shadow nobody can tell from a fresh
  * one. Everything else — benches, stones, torch stakes, the firewood — is
- * bolted to the ground.
+ * bolted to the ground. Once those tent transforms settle there is no periodic
+ * shadow work at all.
  */
 const SHADOW_HZ = 6
 
@@ -170,9 +187,9 @@ const SHADOW_HZ = 6
  * the first frame to the last.
  *
  * One for the fire, six for the door torches, three for the tent lamps, and
- * four interior sources — two candles, a lantern and the reading light — which
- * belong to whichever tent is `active` and to no other. Exactly one tent is
- * ever active, so the four exist exactly once.
+ * two interior sources — the lantern and the reading light — which belong to
+ * whichever tent is `active` and to no other. Exactly one tent is ever active,
+ * so the pair exists exactly once (at zero intensity while still outside).
  *
  * This is not a tidiness rule, it is the difference between the walk-in being
  * an animation and being a freeze. Three.js bakes `NUM_POINT_LIGHTS` into every
@@ -188,12 +205,12 @@ const SHADOW_HZ = 6
  * identical image — the `here` gate in `Tent`, the `lit` prop on `TorchFlame`,
  * and the `inside` ramp all became multipliers rather than mounts.
  *
- * The four extra lights that now burn at zero in the lobby cost about 0.7ms a
- * frame. That is the price, and it is worth paying several times over.
+ * The two extra lights that burn at zero in the lobby preserve the shader
+ * program across entry without doing any lighting work.
  *
  * **If you add a light to this scene, mount it unconditionally.**
  */
-const MOUNTED_POINT_LIGHTS = 14
+const MOUNTED_POINT_LIGHTS = 12
 
 /**
  * Mip levels in the bloom's blur stack. **The one knob left on the table.**
@@ -230,16 +247,49 @@ installHeightFog()
 
 export type TentIndex = 0 | 1 | 2
 
-/** Structure_Tent_01 — tall pavilion, 9.79 x 5.20 x 5.28 raw. */
+/** Optimized Meshy A-frame tent from the clean blue-painted Blender source. */
+const CABIN_BLUE_URL = '/models/tent-painted-blue-final.glb?v=4'
 const TENT = {
-  node: 'Tent',
-  scale: 0.62,
-  /** Turns the mesh so its doorway faces the clearing. */
-  flip: Math.PI,
-  rawDepth: 5.28,
-  rawHeight: 5.2,
-  rawWidth: 9.79,
+  scale: 3.55,
+  /** The supplied GLB already faces +Z, toward the clearing. */
+  flip: 0,
+  /** Meshy exports the tent around its origin; lift its lowest vertex to y=0. */
+  rawBaseOffset: 0.40039,
+  rawDepth: 0.82813,
+  rawHeight: 0.79687,
+  rawWidth: 1,
 } as const
+useGLTF.preload(CABIN_BLUE_URL)
+
+/**
+ * Exact red channels from the four neutral Fabric030 maps, packed RGBA as
+ * colour / height / roughness / AO. Runtime tint remains the source of hue.
+ */
+const TENT_CLOTH = '/textures/tent-cloth/fabric030-neutral/Fabric030_Packed.webp'
+const TENT_LEATHER_GRAIN = '/textures/tent-cloth/leather-grain.webp'
+/** Dense weave, with mipmaps/anisotropy keeping it stable at campsite distance. */
+const TENT_CLOTH_SCALE = 3.2
+/**
+ * Reversible fabric trial. The normal site shows the weave; append
+ * `?tentFabric=off` to compare against the untouched painted-canvas look.
+ */
+const TENT_FABRIC_PREVIEW =
+  typeof window === 'undefined' ||
+  new URLSearchParams(window.location.search).get('tentFabric') !== 'off'
+// Keep high-frequency colour contrast restrained; the normal response carries
+// most of the close detail and mipmaps remove it cleanly at distance.
+const TENT_FABRIC_COLOR_STRENGTH = TENT_FABRIC_PREVIEW ? 0.32 : 0
+const TENT_FABRIC_NORMAL_STRENGTH = TENT_FABRIC_PREVIEW ? 0.09 : 0
+const TENT_FABRIC_ROUGHNESS_STRENGTH = TENT_FABRIC_PREVIEW ? 0.28 : 0
+const TENT_FABRIC_AO_STRENGTH = TENT_FABRIC_PREVIEW ? 0.045 : 0
+const TENT_CANVAS = {
+  roughness: 0.93,
+  metalness: 0,
+  envMapIntensity: 0.35,
+  aoMapIntensity: 0.75,
+  normalStrength: 0.065,
+} as const
+useTexture.preload(TENT_CLOTH)
 
 const BACK = (TENT.rawDepth * TENT.scale) / 2
 const HALF_W = (TENT.rawWidth * TENT.scale) / 2
@@ -250,6 +300,17 @@ const TOP = TENT.rawHeight * TENT.scale
  * turned inward so the three sit on an arc rather than in a shop-window row.
  */
 const CAMP_X = 0
+// Development-only treeline audit pan. It lets QA bring edge instances into
+// the centre of the browser without changing their transforms or the shipped
+// camera. Example: `?treeAudit=-8` inspects the far-left outer band.
+const TREE_AUDIT_PAN =
+  import.meta.env.DEV && typeof window !== 'undefined'
+    ? THREE.MathUtils.clamp(
+        Number.parseFloat(new URLSearchParams(window.location.search).get('treeAudit') ?? '0') || 0,
+        -20,
+        20
+      )
+    : 0
 /*
   VISUAL-13.10a (2026-08-30): the two outer tents were mirror images at the same
   depth and the same angle — was z -5.4 / yaw ±0.46 for both.
@@ -268,17 +329,87 @@ const CAMP_X = 0
 */
 const TENTS = [
   { x: CAMP_X - 8.2, z: -5.05, yaw: 0.53 },
-  { x: CAMP_X, z: -8.15, yaw: 0.04 },
+  // Exactly square to the lobby camera when the pointer is centred.
+  { x: CAMP_X, z: -8.15, yaw: 0 },
   { x: CAMP_X + 8.2, z: -5.85, yaw: -0.4 },
 ]
-const TENT_TINT = ['#e8492c', '#3f6ef5', '#f5b722']
-/** Saturated neon versions for the signage — a tent tint is fabric, not light. */
-const TENT_NEON = ['#ff5a3c', '#5aa0ff', '#ffc94a']
-/** `THREE.Color` copies of TENT_NEON, for props that take a Color object. */
-const TENT_NEON_COLOR = /* @__PURE__ */ TENT_NEON.map((c) => new THREE.Color(c))
+const MOON_KEY_NAME = 'camp-moon-key'
+
+/** Aim the existing moon shadow camera without changing the light itself. */
+function aimMoonShadow(
+  light: THREE.DirectionalLight,
+  tentIndex: number | null
+) {
+  const cam = light.shadow.camera as THREE.OrthographicCamera
+  if (tentIndex !== null) {
+    const tent = TENTS[tentIndex]
+    const size = 3.4
+    cam.left = -size
+    cam.right = size
+    cam.top = size
+    cam.bottom = -size
+    light.position.set(
+      tent.x + MOON_LIGHT.x * 26,
+      MOON_LIGHT.y * 26,
+      tent.z + MOON_LIGHT.z * 26
+    )
+    light.target.position.set(tent.x, 0.7, tent.z)
+  } else {
+    cam.left = -24
+    cam.right = 24
+    cam.top = 22
+    cam.bottom = -14
+    light.position.set(MOON_LIGHT.x * 42, MOON_LIGHT.y * 42, MOON_LIGHT.z * 42)
+    light.target.position.set(CAMP_X, 0, -3)
+  }
+  // The target is not in the scene graph, so the shadow camera cannot update
+  // it automatically before reading its world position.
+  light.target.updateMatrixWorld()
+  cam.updateProjectionMatrix()
+}
+const FIREFLY_TENT_EXCLUSIONS = TENTS.map(({ x, z, yaw }) => ({
+  x,
+  z,
+  yaw,
+  halfWidth: HALF_W + 0.12,
+  halfDepth: BACK + 0.16,
+  maxY: TENT.rawHeight * TENT.scale + 0.12,
+}))
+/** Exact sRGB canvas bases: About maroon, Gameplay sand, Projects charcoal. */
+const TENT_TINT = ['#5A2F38', '#9A896C', '#394A53'] as const
+/**
+ * Screen-space accents matched to the canvas as it appears under camp light:
+ * brick-maroon, warm sand, and muted blue-teal. They are lifted only enough
+ * to remain legible against the trees; the previous pastel values drifted too
+ * far toward pink, white, and cyan.
+ */
+const TENT_GLOW = ['#a84f50', '#c8aa70', '#54777b'] as const
+/** Dyed leather accents shared by all three variants of the About book mesh. */
+const BOOK_ACCENT = ['#7f3443', '#8b7650', '#3b8f91'] as const
+/** One weathered, neutral wood base shared by every tent frame. */
+const TENT_WOOD = '#5B3B29'
+const TENT_WOOD_ROUGHNESS = 0.82
+const TENT_RIBBON = '#24170F'
+const TENT_RIBBON_ROUGHNESS = 0.78
+const TENT_INTERIOR_LIGHT = '#ffb06a'
+const TENT_INTERIOR_COLOR = /* @__PURE__ */ new THREE.Color(TENT_INTERIOR_LIGHT)
 const TENT_LABEL = ['About', 'Gameplay', 'Projects']
+/** One shared post-exit guard for both the tent outline and hover scale. */
+const EXIT_HOVER_GUARD_MS = 1000
+/** Shared delay from choosing a tent to both glowing and opening its book. */
+const BOOK_INTERACTION_DELAY_MS = 1300
+/** Rate used by the camera's exponential walk-in progress. */
+const TENT_TRAVEL_DAMPING = 1.33
+/** Travel reached after the shared interaction delay at the rate above. */
+const BOOK_OPEN_TRAVEL_THRESHOLD =
+  1 - Math.exp((-TENT_TRAVEL_DAMPING * BOOK_INTERACTION_DELAY_MS) / 1000)
 
 const EYE = 2.15
+
+/** Enables production diagnostics only when the local profiling harness asks. */
+const PROFILE_INSPECT =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('profile') === '1'
 
 /**
  * Dev-only freezes, so a damped animation can be screenshotted.
@@ -296,8 +427,11 @@ const FROZEN_TRAVEL = frozen('travel')
 const FROZEN_BOOK = frozen('book')
 /** `?hot=1` pins a tent's hover highlight on, so it can be screenshotted. */
 const FROZEN_HOT = frozen('hot')
+/** Dev-only profiler switches; production always renders the complete preset. */
+const PROFILE_SHADOWS = frozen('shadows') !== 0
+const PROFILE_FIREFLIES = frozen('fireflies') !== 0
+const PROFILE_LEAVES = frozen('leaves') !== 0
 const FIRE_POS: [number, number, number] = [CAMP_X, 0, 1.2]
-const FIRE_VEC = new THREE.Vector3(...FIRE_POS)
 
 /**
  * The low bench the journal lies open on, in the tent's own frame.
@@ -319,7 +453,16 @@ const BENCH = {
 
 /** Where the journal lies inside a tent, in the tent's own frame. */
 const BOOK_LOCAL = new THREE.Vector3(0, BENCH.top, BENCH.z + 0.02)
-const BOOK_WIDTH = 0.6
+/**
+ * Width of the *open spread*, in metres — the shut board is a little over half.
+ *
+ * Down from 0.6 with the deeper page (see `PAGE_DEPTH`). The two together are
+ * what turn the journal from a wide slab into a portrait book: the board keeps
+ * its height in the frame and loses about 6% across, and the candles either
+ * side of it — which are placed in the tent, not on the book — stay where they
+ * were, so the shot gains the air around the journal that it was missing.
+ */
+const BOOK_WIDTH = 0.561
 
 /**
  * Reading pose, relative to the journal: how far back toward the door the eye
@@ -337,6 +480,57 @@ const READ_BACK = 0.33
 const READ_RISE = 0.73
 
 /**
+ * Aspect the reading shot is composed at, and the vertical field it is composed
+ * with.
+ *
+ * The pose is 0.80m off the board, pitched about 66 degrees down. The authored
+ * Unity layouts span the full bench, so the reading field is intentionally
+ * wider than the old book-only composition: the journal remains central while
+ * the lantern, tools, and outermost props all stay inside the frame.
+ */
+const READ_ASPECT = 1810 / 869
+const BENCH_READ_FOV = 72
+const OPEN_BOOK_FOV = 42
+
+/**
+ * The reading field at a given aspect: contain, not cover.
+ *
+ * A fixed vertical field is a *cover* fit. Narrow the window and the horizontal
+ * field closes with it, so the journal grows across the frame until the boards
+ * run off both edges and the candles are gone. Holding the *horizontal* field
+ * and letting the vertical one open instead means a narrower viewport shows
+ * more tent above and below the book and never less of it across — the book
+ * cannot swell into the frame or be cropped out of it.
+ *
+ * The vertical field is never allowed below its composed value, so a viewport
+ * wider than the reference gets more room at the sides rather than a bigger
+ * book. There is a stop at the other end: a contain fit on a window taller than
+ * it is wide asks for better than 80 degrees, and by then the frame has run off
+ * the far edge of the bench and is showing what is under it. The stop is set
+ * where it is — not tighter — because the two candles are the first thing a
+ * tighter one costs, and the brief for this shot is that they stay in it. It
+ * only starts to bite below about 1.3:1, and portrait on touch is behind the
+ * landscape gate anyway.
+ */
+const BENCH_READ_FOV_MAX = 82
+const OPEN_BOOK_FOV_MAX = 76
+function containedReadFov(aspect: number, baseFov: number, maxFov: number) {
+  const halfV = Math.tan(THREE.MathUtils.degToRad(baseFov) / 2)
+  const half = Math.min(
+    Math.tan(THREE.MathUtils.degToRad(maxFov) / 2),
+    Math.max(halfV, (halfV * READ_ASPECT) / aspect)
+  )
+  return THREE.MathUtils.radToDeg(Math.atan(half)) * 2
+}
+
+/** Wide while surveying the setup, then back to the original book close-up. */
+function readFov(aspect: number, open: number) {
+  const bench = containedReadFov(aspect, BENCH_READ_FOV, BENCH_READ_FOV_MAX)
+  const book = containedReadFov(aspect, OPEN_BOOK_FOV, OPEN_BOOK_FOV_MAX)
+  return THREE.MathUtils.lerp(bench, book, smoothstep(0.05, 0.9, open))
+}
+
+/**
  * How far the reading pose drops below the pitch line, in metres.
  *
  * The journal was not centred in its own shot: shut, it left 190px of tent
@@ -352,6 +546,20 @@ const READ_RISE = 0.73
  * than the board, so this splits them.
  */
 const READ_FRAME_LIFT = -0.088
+
+/**
+ * And how far it then slides *in the frame*, in metres at the book's distance.
+ *
+ * Not the same move as the lift above. Raising the eye and the aim point
+ * through world Y leaves the view direction alone but carries the eye away
+ * from the book along it, so the journal changes size as well as position —
+ * which is why every attempt to nudge the composition down also shrank it by
+ * a tenth. This shift is struck along the frame's own up axis, perpendicular
+ * to the view, and is therefore a pure translation of the picture: positive
+ * raises the camera in its own plane, which walks the whole scene — book,
+ * candles, rails and the tabletop's horizon together — down the frame.
+ */
+const READ_FRAME_SHIFT = 0.022
 
 /**
  * Height the lens holds while it is threading the doorway.
@@ -452,7 +660,7 @@ function smoothstep(a: number, b: number, x: number) {
 
 /* ------------------------------------------------------------------ ground */
 
-/** Radial alpha mask, reused for the trodden patch and the journal's shadow. */
+/** Radial alpha mask reused by the campsite's broad contact shadows. */
 function makeDiscMask(stops: [number, number][]) {
   const size = 128
   const c = document.createElement('canvas')
@@ -465,61 +673,6 @@ function makeDiscMask(stops: [number, number][]) {
   return new THREE.CanvasTexture(c)
 }
 
-/**
- * A soft-edged rounded rectangle, for the shadow under something rectangular.
- *
- * The disc mask is right under a tent, whose footprint is roughly round from
- * above and whose shadow nobody reads as a shape. Under the journal it is
- * wrong in a way that is immediately legible: a book is a slab, and a perfect
- * circle of shade around a slab is the one thing in the tent that announces
- * itself as a decal. Drawn with a stack of expanding blurred rectangles rather
- * than one blur pass, because a single large `shadowBlur` on a rounded rect
- * comes back banded on some drivers.
- */
-function makeSlabMask() {
-  const size = 256
-  const c = document.createElement('canvas')
-  c.width = c.height = size
-  const ctx = c.getContext('2d')!
-  const img = ctx.createImageData(size, size)
-
-  // Written a pixel at a time from the rounded-rectangle distance field rather
-  // than drawn and blurred. Both canvas blurs were tried first and neither is
-  // dependable here: `ctx.filter` is missing or ignored in some of the
-  // contexts this runs in — including the headless one the screenshots come
-  // out of — and stacking translucent rects to fake it saturates in the middle
-  // and leaves a hard edge where the stack ends, which is the giveaway this
-  // whole texture exists to avoid.
-  const half = size / 2
-  // The solid core, as a fraction of the half-size, and the penumbra past it.
-  const coreX = half * 0.64
-  const coreY = half * 0.58
-  const round = half * 0.08
-  const soft = half * 0.3
-
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      // Distance outside the rounded rect; zero anywhere inside it.
-      const dx = Math.max(Math.abs(x + 0.5 - half) - (coreX - round), 0)
-      const dy = Math.max(Math.abs(y + 0.5 - half) - (coreY - round), 0)
-      const d = Math.max(0, Math.hypot(dx, dy) - round)
-      const t = Math.min(1, d / soft)
-      // Squared falloff: a contact shadow is dark and tight where the object
-      // meets the surface and gives up quickly, not a linear ramp.
-      const a = (1 - t) * (1 - t)
-      const i = (y * size + x) * 4
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255
-      img.data[i + 3] = Math.round(a * 255)
-    }
-  }
-
-  ctx.putImageData(img, 0, 0)
-  return new THREE.CanvasTexture(c)
-}
-
-/** The journal's own shadow: a slab's, not a disc's. */
-const slabShadow = /* @__PURE__ */ (() => (typeof document === 'undefined' ? null : makeSlabMask()))()
-
 /** One texture for every tent's contact shadow — it never changes. */
 const contactShadow = /* @__PURE__ */ (() =>
   typeof document === 'undefined'
@@ -531,6 +684,91 @@ const contactShadow = /* @__PURE__ */ (() =>
       ]))()
 
 /**
+ * One authored shadow bake for the static furniture inside every tent.
+ *
+ * A single stretched disc made the whole bench-and-seat area read as one dark
+ * puddle. This mask keeps the broad, soft occlusion under the bench separate
+ * from the tighter floor-pillow contact and adds only a faint connecting penumbra.
+ * It is still one texture and one draw per tent, with no shadow-map updates.
+ */
+function makeTentInteriorShadowMask() {
+  const w = 256
+  const h = 192
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')!
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, w, h)
+  ctx.globalCompositeOperation = 'lighter'
+
+  const ellipse = (x: number, y: number, rx: number, ry: number, strength: number) => {
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.scale(1, ry / rx)
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx)
+    g.addColorStop(0, `rgba(255,255,255,${strength})`)
+    g.addColorStop(0.42, `rgba(255,255,255,${strength * 0.72})`)
+    g.addColorStop(0.76, `rgba(255,255,255,${strength * 0.22})`)
+    g.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(0, 0, rx, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
+
+  ellipse(w * 0.5, h * 0.35, w * 0.44, h * 0.19, 0.92)
+  ellipse(w * 0.5, h * 0.73, w * 0.19, h * 0.16, 0.9)
+  ellipse(w * 0.5, h * 0.53, w * 0.27, h * 0.2, 0.18)
+
+  const texture = new THREE.CanvasTexture(c)
+  texture.colorSpace = THREE.NoColorSpace
+  return texture
+}
+
+const tentInteriorShadow = /* @__PURE__ */ (() =>
+  typeof document === 'undefined' ? null : makeTentInteriorShadowMask())()
+
+/**
+ * Soft, slightly irregular footprint for the close-detail soil inside a tent.
+ *
+ * The tent has no authored floor mesh: without this patch the reading camera
+ * sees the 360m landscape material, whose maps repeat at landscape scale. A
+ * distance field keeps the replacement entirely under the canvas and avoids a
+ * rectangular decal edge at the doorway.
+ */
+function makeTentFloorMask() {
+  const size = 192
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const ctx = c.getContext('2d')!
+  const image = ctx.createImageData(size, size)
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size - 0.5
+      const v = (y + 0.5) / size - 0.5
+      const edgeNoise =
+        Math.sin(x * 0.31 + y * 0.17) * 0.006 +
+        Math.sin(x * 0.071 - y * 0.113) * 0.009
+      const qx = Math.abs(u) - (0.455 + edgeNoise)
+      const qy = Math.abs(v) - (0.43 + edgeNoise * 0.7)
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0)
+      const fade = clamp01(1 - (outside + 0.012) / 0.055)
+      const a = fade * fade * (3 - 2 * fade)
+      const i = (y * size + x) * 4
+      image.data[i] = image.data[i + 1] = image.data[i + 2] = Math.round(a * 255)
+      image.data[i + 3] = 255
+    }
+  }
+  ctx.putImageData(image, 0, 0)
+  const texture = new THREE.CanvasTexture(c)
+  texture.colorSpace = THREE.NoColorSpace
+  return texture
+}
+
+/**
  * Radius of the trodden clearing round the fire.
  *
  * Tighter than the paved circle it replaces. Bare earth reads as bare earth
@@ -538,7 +776,7 @@ const contactShadow = /* @__PURE__ */ (() =>
  * actually fall — and a wider patch than the firelight covers came out as a
  * flat grey pad in the middle of the frame.
  */
-const WALK_R = 3.85
+const WALK_R = 4.65
 
 /**
  * Half-width of a trodden path, in metres.
@@ -625,25 +863,106 @@ function makeWalkwayMask() {
   return new THREE.CanvasTexture(c)
 }
 
+/**
+ * Soft, irregular alpha for the three worn footpaths.
+ *
+ * The path geometry is deliberately simple; the edge is what stops it reading
+ * as a rectangular decal. A blurred, slightly wandering capsule gives the dirt
+ * a trampled boundary that grass can close over without introducing another
+ * authored texture.
+ */
+function makePathMask() {
+  const width = 256
+  const height = 128
+  const c = document.createElement('canvas')
+  c.width = width
+  c.height = height
+  const ctx = c.getContext('2d')!
+  const r = rng(8151)
+  const top: [number, number][] = []
+  const bottom: [number, number][] = []
+
+  for (let i = 0; i <= 16; i++) {
+    const x = 12 + (i / 16) * (width - 24)
+    const endFade = Math.sin((i / 16) * Math.PI)
+    const half = (42 + (r() - 0.5) * 13) * (0.38 + endFade * 0.62)
+    top.push([x, height / 2 - half])
+    bottom.push([x, height / 2 + half])
+  }
+
+  ctx.filter = 'blur(5px)'
+  ctx.fillStyle = '#fff'
+  ctx.beginPath()
+  ctx.moveTo(top[0][0], top[0][1])
+  for (const [x, y] of top.slice(1)) ctx.lineTo(x, y)
+  for (const [x, y] of bottom.reverse()) ctx.lineTo(x, y)
+  ctx.closePath()
+  ctx.fill()
+  ctx.filter = 'none'
+
+  // A few small bites keep even the blurred edge from becoming one perfect
+  // stroke. They live at the sides, never in the path's readable centre.
+  ctx.globalCompositeOperation = 'destination-out'
+  for (let i = 0; i < 24; i++) {
+    const x = 18 + r() * (width - 36)
+    const side = r() > 0.5 ? 1 : -1
+    const y = height / 2 + side * (35 + r() * 18)
+    const radius = 3 + r() * 9
+    const g = ctx.createRadialGradient(x, y, 0, x, y, radius)
+    g.addColorStop(0, 'rgba(0,0,0,0.8)')
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalCompositeOperation = 'source-over'
+
+  const texture = new THREE.CanvasTexture(c)
+  texture.colorSpace = THREE.NoColorSpace
+  return texture
+}
+
+/** World transforms for the paths, from the clearing to each doorway. */
+function campPaths() {
+  return TENTS.map((_, index) => {
+    const door = tentDoorSpill(index)
+    const dx = door.x - FIRE_POS[0]
+    const dz = door.z - FIRE_POS[2]
+    const full = Math.hypot(dx, dz)
+    const ux = dx / full
+    const uz = dz / full
+    // Let the path disappear under the clearing instead of ending at its rim.
+    const inset = WALK_R * 0.55
+    const sx = FIRE_POS[0] + ux * inset
+    const sz = FIRE_POS[2] + uz * inset
+    const length = Math.hypot(door.x - sx, door.z - sz)
+    return {
+      x: (sx + door.x) * 0.5,
+      z: (sz + door.z) * 0.5,
+      yaw: Math.atan2(door.x - sx, door.z - sz),
+      length,
+      width: PATH_HALF * 2.25,
+    }
+  })
+}
+
 function Ground() {
-  const [grass, grassN, dirt, dirtN] = useLoader(THREE.TextureLoader, [
-    '/textures/T_AutumnGrass_01_C.webp',
-    '/textures/T_AutumnGrass_01_N.webp',
+  const [dirt, dirtN, clearingDirt, clearingDirtN] = useLoader(THREE.TextureLoader, [
     '/textures/T_Dirt_Ground_C.webp',
     '/textures/T_Dirt_Ground_N.webp',
+    '/textures/T_Dirt_Ground_C_Clean.webp',
+    '/textures/T_Dirt_Ground_N_Clean.webp',
   ])
 
   const walkMask = useMemo(makeWalkwayMask, [])
+  const pathMask = useMemo(makePathMask, [])
+  const paths = useMemo(campPaths, [])
 
   useMemo(() => {
-    for (const t of [grass, grassN]) {
-      t.wrapS = t.wrapT = THREE.RepeatWrapping
-      t.repeat.set(96, 96)
-      t.anisotropy = 8
-    }
-    grass.colorSpace = THREE.SRGBColorSpace
     dirt.colorSpace = THREE.SRGBColorSpace
-    for (const t of [dirt, dirtN]) {
+    clearingDirt.colorSpace = THREE.SRGBColorSpace
+    for (const t of [dirt, dirtN, clearingDirt, clearingDirtN]) {
       t.wrapS = t.wrapT = THREE.RepeatWrapping
       // Four tiles across an 8.9m disc is a little over two metres of ground
       // per tile, which is close enough to the scale the pack authored it at
@@ -651,7 +970,48 @@ function Ground() {
       t.repeat.set(4, 4)
       t.anisotropy = 8
     }
-  }, [grass, grassN, dirt, dirtN])
+  }, [dirt, dirtN, clearingDirt, clearingDirtN])
+
+  // The field under the grass blades is soil, not a second carpet of green.
+  // Separate samplers let the same source map tile at landscape scale here and
+  // at close-up scale on the fire circle without mutating either use.
+  const fieldDirt = useMemo(() => {
+    const t = dirt.clone()
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(120, 120)
+    t.anisotropy = 8
+    t.needsUpdate = true
+    return t
+  }, [dirt])
+  const fieldDirtN = useMemo(() => {
+    const t = dirtN.clone()
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(120, 120)
+    t.anisotropy = 8
+    t.needsUpdate = true
+    return t
+  }, [dirtN])
+
+  // The reading camera is close enough to resolve individual ruts. Keep these
+  // samplers independent from both the 120x landscape tiling and the 4x fire
+  // clearing tiling so each tent gets roughly metre-scale authored detail.
+  const tentFloorDirt = useMemo(() => {
+    const t = clearingDirt.clone()
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(1.65, 1.35)
+    t.anisotropy = 8
+    t.needsUpdate = true
+    return t
+  }, [clearingDirt])
+  const tentFloorDirtN = useMemo(() => {
+    const t = clearingDirtN.clone()
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(1.65, 1.35)
+    t.anisotropy = 8
+    t.needsUpdate = true
+    return t
+  }, [clearingDirtN])
+  const tentFloorMask = useMemo(makeTentFloorMask, [])
 
   /**
    * Where everyone stands: bare trodden earth, no grass and no paving.
@@ -671,14 +1031,19 @@ function Ground() {
     // on the roughness map below, which is the same argument — and this disc
     // sits in the middle of the frame under a parallax march, so it is the one
     // surface paying for both at once.
-    const m = new THREE.MeshLambertMaterial({
-      map: dirt,
-      normalMap: dirtN,
+    const m = new THREE.MeshStandardMaterial({
+      // The clearing uses a median-cleaned copy of the exact same authored
+      // soil maps. It removes only the long twig/scratch strokes circled in the
+      // reference; color grade, scale, lighting, relief, and edge mask stay put.
+      map: clearingDirt,
+      normalMap: clearingDirtN,
       // No roughness map. The pack authors this one for a daylit terrain
       // shader and its gloss reads as wet: under a point light a metre off the
       // ground the specular lobe swept the whole disc and the clearing came out
       // looking like a pond with the fire reflected in it.
-      normalScale: new THREE.Vector2(0.9, 0.9),
+      normalScale: new THREE.Vector2(0.82, 0.82),
+      roughness: 0.96,
+      metalness: 0,
       alphaMap: walkMask,
       transparent: true,
       // Warm, because this is the one patch of ground the fire genuinely
@@ -687,7 +1052,10 @@ function Ground() {
       // A touch up from #5a3f28. Lambert has no specular term, and on this disc
       // the sheen it lost was the one thing carrying a little of the sky's
       // colour into the middle of the frame — the albedo has to make it back.
-      color: '#694c30',
+      color: '#4a2f20',
+      emissive: new THREE.Color('#3b1809'),
+      emissiveMap: clearingDirt,
+      emissiveIntensity: 0.45,
       polygonOffset: true,
       polygonOffsetFactor: -2,
     })
@@ -711,7 +1079,38 @@ function Ground() {
     // and the cost of it is.
     applyParallax(m, { depth: 0.012, steps: 9, occlusion: 0.34 })
     return m
-  }, [dirt, dirtN, walkMask])
+  }, [clearingDirt, clearingDirtN, walkMask])
+
+  /** The same packed soil, cooler and drier where the central fire is absent. */
+  const pathMat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      map: dirt,
+      normalMap: dirtN,
+      normalScale: new THREE.Vector2(0.72, 0.72),
+      roughness: 0.98,
+      metalness: 0,
+      color: '#6a3f25',
+      emissive: new THREE.Color('#4a1d09'),
+      emissiveMap: dirt,
+      emissiveIntensity: 0.5,
+      alphaMap: pathMask,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+    })
+    return m
+  }, [dirt, dirtN, pathMask])
+
+  useEffect(
+    () => () => {
+      walkMask.dispose()
+      pathMask.dispose()
+      earthMat.dispose()
+      pathMat.dispose()
+    },
+    [walkMask, pathMask, earthMat, pathMat]
+  )
 
   /*
     Lambert, like the field standing on it. This plane is the single largest
@@ -729,41 +1128,67 @@ function Ground() {
   */
   const grassMat = useMemo(() => {
     const m = new THREE.MeshLambertMaterial({
-      map: grass,
-      normalMap: grassN,
-      normalScale: new THREE.Vector2(0.75, 0.75),
-      // Cool, not brown — this is the soil *between* the blades, and out past
-      // the fire's reach it is most of what the eye actually sees of the
-      // field. The warmth now comes from applyGroundGlow's own pool instead
-      // of a flat multiply, so this stays the resting colour of unlit ground.
-      color: '#3a4055',
+      map: fieldDirt,
+      normalMap: fieldDirtN,
+      normalScale: new THREE.Vector2(0.62, 0.62),
+      color: '#ffffff',
     })
     applyGroundGlow(m, {
-      // Most of the way to grey, same as the blades: enough of the map's own
-      // pattern survives to keep the ground from looking painted, not enough
-      // for the autumn yellow to fight the tint on top of it.
-      desaturateMap: 0.72,
-      mapTint: new THREE.Color('#4a7a3c'),
+      desaturateMap: 0.28,
+      mapTint: new THREE.Color('#574638'),
       // Same rust-orange the blades stand in, so the pool under everyone's
       // feet reads as one fire rather than the ground and the grass disagreeing
       // on what colour it is.
-      warmColor: new THREE.Color('#ff9a55'),
-      warmGain: 0.16,
+      warmColor: new THREE.Color('#e88d48'),
+      warmGain: 0.1,
       // The far field's only light once it is out of the fire's reach: the
       // same teal-to-magenta ramp the canopies bounce, flat rather than
       // height-weighted because the ground has no crown to bias toward.
-      aurora: { low: AURORA_BOUNCE_LOW, mid: AURORA_BOUNCE_MID, high: AURORA_BOUNCE_HIGH, gain: 0.05 },
+      aurora: { low: AURORA_BOUNCE_LOW, mid: AURORA_BOUNCE_MID, high: AURORA_BOUNCE_HIGH, gain: 0.034 },
       // A small constant lift so the plane past both of those never actually
       // hits (0,0,0) — see NIGHT.ambient for why the scene-wide version of
       // this stays just as small.
-      floor: new THREE.Color('#0a1120'),
+      floor: new THREE.Color('#3a332d'),
     })
     // LIGHTING-REWORK (2026-08-17): shares GRASS_GAIN with the blade
     // materials in useKit.ts, so the ?debug panel's "Grass" slider moves the
     // ground plane and the blades standing on it together.
     attachDebugGain(m, GRASS_GAIN)
     return m
-  }, [grass, grassN])
+  }, [fieldDirt, fieldDirtN])
+
+  const tentFloorMat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      map: tentFloorDirt,
+      normalMap: tentFloorDirtN,
+      normalScale: new THREE.Vector2(0.86, 0.86),
+      roughness: 0.97,
+      metalness: 0,
+      color: '#5a4132',
+      alphaMap: tentFloorMask,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+    })
+    // Five samples are enough at this shallow depth; these three small patches
+    // are the only close ground surfaces besides the central clearing.
+    applyParallax(m, { depth: 0.008, steps: 5, occlusion: 0.22 })
+    return m
+  }, [tentFloorDirt, tentFloorDirtN, tentFloorMask])
+
+  useEffect(
+    () => () => {
+      fieldDirt.dispose()
+      fieldDirtN.dispose()
+      grassMat.dispose()
+      tentFloorDirt.dispose()
+      tentFloorDirtN.dispose()
+      tentFloorMask.dispose()
+      tentFloorMat.dispose()
+    },
+    [fieldDirt, fieldDirtN, grassMat, tentFloorDirt, tentFloorDirtN, tentFloorMask, tentFloorMat]
+  )
 
   return (
     <group>
@@ -773,12 +1198,33 @@ function Ground() {
 
       <mesh
         rotation-x={-Math.PI / 2}
-        position={[FIRE_POS[0], 0.012, FIRE_POS[2] - 0.35]}
+        position={[FIRE_POS[0], 0.012, FIRE_POS[2]]}
         material={earthMat}
         receiveShadow
       >
         <circleGeometry args={[WALK_R, 72]} />
       </mesh>
+
+      {/* Worn lanes reuse the clearing's soil maps. Their soft masks keep them
+          from reading as stamped rectangles. */}
+      {paths.map((path, i) => (
+        <group key={`path${i}`} position={[path.x, 0.018, path.z]} rotation-y={path.yaw}>
+          <mesh rotation-x={-Math.PI / 2} material={pathMat} receiveShadow renderOrder={-1}>
+            <planeGeometry args={[path.width, path.length]} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Close-scale dirt inside each canvas footprint. The bench and pillow
+          shadows are painted separately in Tent, so the static lantern never
+          pays for a six-face point-light shadow map. */}
+      {TENTS.map((tent, i) => (
+        <group key={`tent-floor${i}`} position={[tent.x, 0.024, tent.z]} rotation-y={tent.yaw}>
+          <mesh rotation-x={-Math.PI / 2} material={tentFloorMat} receiveShadow renderOrder={-1}>
+            <planeGeometry args={[HALF_W * 1.9, BACK * 1.78]} />
+          </mesh>
+        </group>
+      ))}
     </group>
   )
 }
@@ -803,7 +1249,7 @@ function Ground() {
   its silhouette, and a silhouette needs the values inside it to agree. Three
   values, half a stop apart, in a darker green.
 */
-const TREE_TINTS = ['#2a3a1d', '#32421f', '#243418']
+const TREE_TINTS = ['#294131', '#344a36', '#22372b']
 
 /**
  * What the wood is lit *by*, applied on top of the species colour.
@@ -877,14 +1323,39 @@ function Scatter() {
     // One flat patch per trunk, gathered as the wood is sown.
     const trunkShadows: { pos: [number, number, number]; tiltX: number; scale: number }[] = []
 
-    const addTree = (x: number, z: number, scale: number) => {
-      const key = species[(r() * 3) | 0]
+    const addTree = (
+      x: number,
+      z: number,
+      scale: number,
+      random = r,
+      fixed?: { species?: (typeof species)[number]; rotY?: number; groundY?: number }
+    ) => {
+      // Always consume the same three random values so fixed composition trees
+      // cannot reshuffle any later tint or scatter placement.
+      const speciesRoll = random()
+      const picked = fixed?.species ?? species[(speciesRoll * 3) | 0]
+      const randomRotY = random() * Math.PI * 2
+      // TreeB's foliage contains isolated card fragments that become floating
+      // black scratches after the surrounding canopy recedes into distance
+      // fog. Reuse TreeC for those placements: the transforms, density, tints,
+      // and RNG order remain unchanged, while the shared species batch avoids
+      // the two draw calls TreeB used to add.
+      const key = picked === 'TreeB' ? 'TreeC' : picked
       const group = treeGroups.get(key) ?? { items: [], colors: [] }
-      group.items.push({ pos: [x, -0.2, z], rotY: r() * Math.PI * 2, scale })
+      group.items.push({
+        // TreeA and TreeC both carry broad, asymmetric buttress geometry near
+        // their bases. Mesh inspection shows it does not settle into a narrow
+        // vertical trunk until roughly local y=4. A fixed world offset failed
+        // on larger trees (notably outer8 at scale 0.409), so burial must scale
+        // with the model and clear the complete authored flare.
+        pos: [x, fixed?.groundY ?? -scale * 4.1, z],
+        rotY: fixed?.rotY ?? randomRotY,
+        scale,
+      })
       trunkShadows.push({ pos: [x, 0.02, z], tiltX: -Math.PI / 2, scale: scale * 3.1 })
       // Depth into the frame.
       const depth = clamp01((-z - 7) / 30)
-      const tint = tints[(r() * tints.length) | 0].clone()
+      const tint = tints[(random() * tints.length) | 0].clone()
       // Which of the two cold quarters this tree is standing under. A slow
       // diagonal across the wood, so a stand agrees with itself and the far
       // side of the clearing does not agree with the near one.
@@ -926,7 +1397,7 @@ function Scatter() {
         the thicker teal fog above — is what puts the camp in front of the
         forest instead of in it.
       */
-      tint.multiplyScalar(1.04 - depth * 0.58)
+      tint.multiplyScalar(1.08 - depth * 0.36)
       group.colors.push(tint)
       treeGroups.set(key, group)
     }
@@ -952,6 +1423,36 @@ function Scatter() {
       if (z > -11) continue
       addTree(x, z, 0.3 + r() * 0.26)
     }
+
+    // Final treeline composition: six real trees close only the visible holes
+    // called out in the approved lobby frame. A separate seed keeps every
+    // existing tree, grass clump, flower, and stone exactly where it was.
+    // Their modest scale overlaps the neighbouring crowns without lifting the
+    // skyline over the moon or closing off the aurora.
+    const gapTreeR = rng(9041)
+    const gapTrees: {
+      x: number
+      z: number
+      scale: number
+      species?: (typeof species)[number]
+      rotY?: number
+    }[] = [
+      { x: -17.2, z: -15.4, scale: 0.34 },
+      { x: -8.8, z: -16.2, scale: 0.34 },
+      { x: -4.1, z: -16.8, scale: 0.34 },
+      { x: 4.2, z: -17.1, scale: 0.36 },
+      // The last two sit one rank nearer than the first pair on the left. Their
+      // trunks and lower crowns close the final cyan openings in the approved
+      // lobby frame without raising the treeline silhouette.
+      { x: -16.4, z: -13.8, scale: 0.32, species: 'TreeA', rotY: 5.69 },
+      { x: -8.1, z: -14.1, scale: 0.33, species: 'TreeA', rotY: 5.69 },
+    ]
+    gapTrees.forEach(({ x, z, scale, species: fixedSpecies, rotY }) =>
+      addTree(x, z, scale, gapTreeR, {
+        species: fixedSpecies,
+        rotY,
+      })
+    )
 
     // Two clumps: GrassA is 40 triangles, GrassB is 200. Splitting evenly put
     // three quarters of the field's triangle count in one of them, so the cheap
@@ -1196,17 +1697,21 @@ function ContactShadow({
   size,
   rotation = 0,
   opacity = 0.5,
+  renderOrder = -2,
+  alphaMap = contactShadow,
 }: {
   position: [number, number, number]
   size: [number, number]
   rotation?: number
   opacity?: number
+  renderOrder?: number
+  alphaMap?: THREE.Texture | null
 }) {
   return (
-    <mesh position={position} rotation={[-Math.PI / 2, 0, rotation]} renderOrder={-2}>
+    <mesh position={position} rotation={[-Math.PI / 2, 0, rotation]} renderOrder={renderOrder}>
       <planeGeometry args={size} />
       <meshBasicMaterial
-        alphaMap={contactShadow ?? undefined}
+        alphaMap={alphaMap ?? undefined}
         color="#04030a"
         transparent
         opacity={opacity}
@@ -1218,9 +1723,15 @@ function ContactShadow({
   )
 }
 
-// LIGHTING-REWORK (2026-08-17, item g/5): one shared glow texture for the
-// three doorway spill pools, tinted per tent via the mesh material's own
-// `color` rather than three separate canvases.
+let lanternBounceTex: THREE.Texture | null = null
+function getLanternBounceTex() {
+  if (!lanternBounceTex) {
+    lanternBounceTex = makeGlowTexture('rgba(255,244,208,0.95)', 'rgba(255,92,18,0.34)')
+  }
+  return lanternBounceTex
+}
+
+// One shared glow texture for the three warm doorway spill pools.
 let doorwaySpillTex: THREE.Texture | null = null
 function getDoorwaySpillTex() {
   if (!doorwaySpillTex) doorwaySpillTex = makeGlowTexture('rgba(255,255,255,0.85)', 'rgba(255,255,255,0.4)')
@@ -1229,7 +1740,7 @@ function getDoorwaySpillTex() {
 
 /**
  * Painted, not lit: a flat additive pool on the ground just outside each
- * tent's doorway, tinted to that tent's own neon.
+ * tent's doorway, tinted to the same amber as the local interior light.
  *
  * imagestats (item g) showed the current frame's interior glow stopping dead
  * at the threshold where the new target reference has colour spilling out
@@ -1238,43 +1749,46 @@ function getDoorwaySpillTex() {
  * not the ground outside), so this is the same fake-pool trick as the
  * torches rather than a change to that light's reach.
  */
-function DoorwaySpill({ position, color, opacity = 0.34 }: { position: [number, number, number]; color: THREE.Color; opacity?: number }) {
-  return (
-    <mesh rotation-x={-Math.PI / 2} position={position}>
-      <planeGeometry args={[2.6, 2.6]} />
-      <meshBasicMaterial
-        map={getDoorwaySpillTex()}
-        color={color}
-        transparent
-        opacity={opacity}
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-        toneMapped={false}
-        fog={false}
-      />
-    </mesh>
-  )
-}
-
-/** Static prop helper — draws a part list at a transform. */
-function Prop({
-  parts,
+function DoorwaySpill({
   position,
+  color,
   rotation = 0,
-  scale = 1,
-  cast = true,
+  opacity = 0.34,
 }: {
-  parts: Part[]
   position: [number, number, number]
+  color: THREE.Color
   rotation?: number
-  scale?: number | [number, number, number]
-  cast?: boolean
+  opacity?: number
 }) {
   return (
-    <group position={position} rotation-y={rotation} scale={scale}>
-      {parts.map((p, i) => (
-        <mesh key={i} geometry={p.geometry} material={p.material} castShadow={cast} receiveShadow />
-      ))}
+    <group position={position} rotation-y={rotation}>
+      <mesh rotation-x={-Math.PI / 2}>
+        <planeGeometry args={[2.6, 2.6]} />
+        <meshBasicMaterial
+          map={getDoorwaySpillTex()}
+          color={color}
+          transparent
+          opacity={opacity}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          toneMapped={false}
+          fog={false}
+        />
+      </mesh>
+      {/* A camera-facing low-frequency scattering lobe makes the warm doorway
+          pool visible in the cool air from every approach angle. */}
+      <sprite position={[0, 0.94, -0.18]} scale={[3.35, 2.35, 1]}>
+        <spriteMaterial
+          map={getDoorwaySpillTex()}
+          color="#ff6730"
+          transparent
+          opacity={0.16}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          toneMapped={false}
+          fog={false}
+        />
+      </sprite>
     </group>
   )
 }
@@ -1293,6 +1807,33 @@ function Prop({
  * tuned to match the grass it lit the tent front like a stage. Three lights is
  * about 2ms of a 32ms frame — the wrong 2ms to spend.
  */
+const TORCH_SELF_LUMINANCE_LIMIT = 0.72
+
+/**
+ * Keep the torch's original point light and therefore its exact illumination
+ * on the campsite, but stop that near-coincident light from clipping the metal
+ * basket to white. The limiter is applied only to cloned torch materials; the
+ * flame and every surrounding surface still receive the untouched light.
+ */
+function makeTorchSelfLimitedMaterial(source: THREE.Material) {
+  const material = source.clone()
+  const previousCompile = source.onBeforeCompile?.bind(source)
+  const previousCacheKey = source.customProgramCacheKey.bind(source)
+
+  material.onBeforeCompile = (shader, renderer) => {
+    previousCompile?.(shader, renderer)
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <opaque_fragment>',
+      `#include <opaque_fragment>
+       float torchSelfLuminance = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+       gl_FragColor.rgb *= min(1.0, ${TORCH_SELF_LUMINANCE_LIMIT.toFixed(2)} / max(torchSelfLuminance, 0.0001));`
+    )
+  }
+  material.customProgramCacheKey = () => `${previousCacheKey()}|torch-self-luminance-v1`
+  material.needsUpdate = true
+  return material
+}
+
 function Torch({
   position,
   seed,
@@ -1303,168 +1844,198 @@ function Torch({
   lit?: boolean
 }) {
   const kit = useKit()
+  const parts = useMemo(
+    () =>
+      kit.parts('Torch').map((part) => ({
+        ...part,
+        material: makeTorchSelfLimitedMaterial(part.material),
+      })),
+    [kit]
+  )
+  useEffect(() => () => parts.forEach((part) => part.material.dispose()), [parts])
+
   return (
     <group position={position}>
-      {kit.parts('Torch').map((p, i) => (
+      {parts.map((p, i) => (
         <mesh key={i} geometry={p.geometry} material={p.material} castShadow />
       ))}
-      <TorchFlame position={[0, 1.66, 0]} seed={seed} lit={lit} />
-    </group>
-  )
-}
-
-/**
- * Table candle: the same shader flame as the torches, scaled to a wick.
- *
- * Small. These stand either side of the journal at the reading pose, and at the
- * previous 0.72 they filled the outer thirds of the frame with two columns of
- * wax — the reading shot is of a book, and a candle in it should read as a
- * candle rather than as a pillar.
- */
-function Candle({
-  position,
-  seed,
-  scale = 0.34,
-  lit = false,
-  gain,
-}: {
-  position: [number, number, number]
-  seed: number
-  scale?: number
-  lit?: boolean
-  gain?: React.RefObject<number>
-}) {
-  const kit = useKit()
-  return (
-    <group position={position}>
-      <group scale={scale}>
-        {kit.parts('Candle2').map((p, i) => (
-          <mesh key={i} geometry={p.geometry} material={p.material} castShadow />
-        ))}
-      </group>
-      {/*
-        Very low intensity, and its own reach.
-
-        A point light falls off with the square of distance, and a wick sitting
-        four centimetres from the edge of a page is *close*: at the value these
-        used to carry — chosen back when they only had to light props — the page
-        received an irradiance of about sixteen and came out as a sheet of white.
-        Down again from 0.16, because even that put a blown highlight on the
-        outer third of each page: at 7cm the falloff term alone is 1/0.005. The
-        reading light over the bench does the actual work; this is the pool of
-        light around the candle itself.
-      */}
-      {/*
-        `hasLight` rather than the usual always-mounted source: two of these
-        exist per tent, and only the active tent's pair should be in the
-        scene's light list. Because exactly one tent is active at a time and
-        React swaps them inside one commit, the total never moves. See
-        MOUNTED_POINT_LIGHTS.
-      */}
-      <TorchFlame
-        position={[0, 0.288 * scale + 0.008, 0]}
-        seed={seed}
-        scale={0.13}
-        light={0.055}
-        reach={1.1}
-        strength={0.45}
-        hasLight={lit}
-        lit={lit}
-        gain={gain}
-        single
-      />
+      <TorchFlame position={[0, 1.66, 0]} seed={seed} lit={lit} smoke />
     </group>
   )
 }
 
 /* ---------------------------------------------------------- tent interiors */
 
-/**
- * What is inside a tent, in the tent's own frame: +Z is out through the
- * doorway, so a visitor looking in from the door has -X on their left.
- *
- * Laid out the way somebody would actually camp rather than symmetrically —
- * bed down one side, a bench to read at against the back wall with a candle at
- * each end, a cushion on the floor to sit on, and the clutter pushed into the
- * corners.
- *
- * **The room is much smaller than the mesh.** Structure_Tent_01's raw X extent
- * is 9.79 units, but two thirds of that is guy ropes and stakes spreading out
- * across the grass. Ray-casting the canvas from the middle of the floor puts
- * the walls at 1.70m at floor level and 1.57m at knee height, and the back wall
- * about 1.45m behind the centre. Dressing to HALF_W instead left the bedroll,
- * the shelf and the cushions sitting out on the grass either side of the tent.
- */
-const ROOM_HALF_W = 1.5
-const ROOM_BACK = -1.4
+/** Unity-local wick positions after centring each setup on its Book3 pair. */
+const BENCH_LANTERN_FLAME = [
+  [0.2233434124, 0.1944315835 - LANTERN_CANDLE_TOP_DROP, -0.5452521079],
+  [0.2233434124, 0.1944315835 - LANTERN_CANDLE_TOP_DROP, -0.5452521079],
+  [0.2888698889, 0.1944315835 - LANTERN_CANDLE_TOP_DROP, 0.5702468261],
+] as const
 
+/** One exact layout from the Unity Props scene, fitted to the web tent. */
 function TentInterior({
   index,
   lit,
-  dressed,
   gain,
   readLight,
+  lanternLight,
+  lanternSpill,
 }: {
   index: number
   /** Whether the interior sources are mounted at all. */
   lit: boolean
-  /**
-   * Whether the clutter that is only ever seen from *inside* is built.
-   *
-   * The shelf, its glassware, the pack and the heaped cushions all sit against
-   * the side and back walls, where the doorway does not show them: from the
-   * clearing a tent is a lit slot with a bed and a bench in it. Three tents'
-   * worth of that is thirty draw calls of props nobody can see, carried for the
-   * whole time the reader is looking at the camp.
-   */
-  dressed: boolean
   /** 0 outside, 1 once the camera has arrived — see `Tent`. */
   gain: React.RefObject<number>
   readLight: React.RefObject<THREE.PointLight | null>
+  lanternLight: React.RefObject<THREE.PointLight | null>
+  /** Upward-only room light rooted at the lantern wick. */
+  lanternSpill: React.RefObject<THREE.SpotLight | null>
 }) {
   const kit = useKit()
-
-  // One seeded pass, like every other scatter here, so the clutter is in the
-  // same place on every load but different in each of the three tents.
-  const corner = useMemo(() => {
-    const r = rng(4100 + index * 17)
-    return (['Pillow6', 'Pillow5', 'Pillow7'] as const).map((part, i) => ({
-      part,
-      pos: [0.78 + r() * 0.26, 0.02 + i * 0.1, 0.45 + r() * 0.45] as [number, number, number],
-      rotation: r() * Math.PI * 2,
-      scale: 0.4 + r() * 0.14,
-    }))
+  const setup = useBenchSetup(index)
+  const flame = [...BENCH_LANTERN_FLAME[index]] as [number, number, number]
+  const flameRoom = useMemo(() => {
+    const p = new THREE.Vector3(...BENCH_LANTERN_FLAME[index])
+    p.multiplyScalar(BENCH.scale).applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
+    return p.add(BOOK_LOCAL)
   }, [index])
+  const spillTarget = useMemo(() => new THREE.Object3D(), [])
+  const floorBounce = useRef<THREE.MeshBasicMaterial>(null)
+  const wallBounce = useRef<THREE.MeshBasicMaterial>(null)
+  const target = useMemo<[number, number, number]>(
+    () => [
+      flame[0] + 0.18,
+      flame[1] + 1.25,
+      flame[2] - Math.sign(flame[2]) * 0.34,
+    ],
+    [flame[0], flame[1], flame[2]]
+  )
+
+  useFrame((state) => {
+    const flick = fireFlicker(state.clock.elapsedTime * 0.8 + index)
+    const k = lit ? gain.current : 0
+    if (floorBounce.current) floorBounce.current.opacity = 0.105 * flick * k
+    if (wallBounce.current) wallBounce.current.opacity = 0.065 * flick * k
+  })
 
   return (
     <group>
-      {/* Bed down the left-hand wall, running front to back. */}
-      <Prop
-        parts={kit.parts('SleepingBag1')}
-        position={[-1.12, 0.02, -0.2]}
-        rotation={Math.PI / 2}
-        scale={1.05}
-        cast={false}
-      />
-      <Prop
-        parts={kit.parts('Pillow5')}
-        position={[-1.12, 0.05, -0.98]}
-        rotation={Math.PI / 2}
-        scale={0.5}
-        cast={false}
-      />
+      {/*
+        The GLB is already centred on the midpoint of the two Unity Book3
+        placeholders. Scale the entire authored arrangement by the same 0.78
+        used by the former web bench, turn its long Z axis across the tent, and
+        put that centre under the real generated journal.
+      */}
+      <group position={BOOK_LOCAL} rotation-y={Math.PI / 2} scale={BENCH.scale}>
+        <primitive object={setup} dispose={null} />
+        <primitive object={spillTarget} position={target} />
+        <TorchFlame
+          position={flame}
+          seed={index * 4.7 + 2.2}
+          scale={0.12}
+          light={0}
+          reach={0}
+          strength={1.15}
+          brightness={2.35}
+          depthTest={false}
+          lit={lit}
+          hasLight={false}
+          gain={gain}
+          smoke={false}
+          extras={false}
+        />
+        {lit && (
+          <>
+            <pointLight
+              ref={lanternLight}
+              position={flame}
+              color="#ff9d52"
+              intensity={0}
+              distance={1.35}
+              decay={2}
+            />
+            {/*
+              The room cue comes from the visible wick, not from an invisible
+              source near the entrance. Aim this spill above the lantern so it
+              catches the canopy and upper props while the journal, entirely
+              below the wick, remains outside the cone. The existing point
+              lights that were tuned for the pages stay untouched.
+            */}
+            <spotLight
+              ref={lanternSpill}
+              target={spillTarget}
+              position={flame}
+              color="#ff9d52"
+              intensity={0}
+              distance={3.4}
+              decay={2}
+              angle={1.2}
+              penumbra={0.78}
+            />
+          </>
+        )}
+      </group>
 
-      {/* The bench, against the back wall, with the journal between two
-          candles. Turned a quarter so its long axis runs across the tent. */}
-      <Prop
-        parts={kit.parts('BenchIndoor')}
-        position={[0, 0, BENCH.z]}
-        rotation={Math.PI / 2}
-        scale={BENCH.scale}
-        cast={false}
-      />
-      <Candle position={[-0.37, BENCH.top, BENCH.z]} seed={index * 3.1} lit={lit} gain={gain} />
-      <Candle position={[0.37, BENCH.top, BENCH.z]} seed={index * 3.1 + 5.4} lit={lit} gain={gain} />
+      {lit && (
+        <>
+          {/* Low-frequency bounced radiance. These cards do not light the
+              journal; they only make the wick's position legible on the floor
+              and rear canvas, like a tiny pre-baked irradiance probe. */}
+          <mesh
+            position={[flameRoom.x, 0.031, flameRoom.z + 0.04]}
+            rotation-x={-Math.PI / 2}
+            renderOrder={0}
+          >
+            <planeGeometry args={[2.35, 1.95]} />
+            <meshBasicMaterial
+              ref={floorBounce}
+              map={getLanternBounceTex()}
+              color="#ff6b22"
+              transparent
+              opacity={0}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              toneMapped
+              fog={false}
+            />
+          </mesh>
+          <mesh position={[flameRoom.x, 1.18, -BACK + 0.035]} renderOrder={-1}>
+            <planeGeometry args={[2.55, 2.05]} />
+            <meshBasicMaterial
+              ref={wallBounce}
+              map={getLanternBounceTex()}
+              color="#ff7a2f"
+              transparent
+              opacity={0}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              toneMapped
+              fog={false}
+            />
+          </mesh>
+        </>
+      )}
+
+      {/* Restored exactly from the pre-layout interior: Pillow7 was the floor
+          seat in front of the bench, not one of the randomized corner props. */}
+      <group
+        name={`RestoredPillow${index + 1}`}
+        position={[0, 0, BENCH.z + 0.88]}
+        rotation-y={0.24}
+        scale={0.78}
+      >
+        {kit.parts('Pillow7').map((part, i) => (
+          <mesh
+            key={i}
+            geometry={part.geometry}
+            material={part.material}
+            castShadow={false}
+            receiveShadow
+          />
+        ))}
+      </group>
+
       {/*
         The light that actually reads the page: one soft source above the
         bench, far enough up that the inverse square is nearly flat across the
@@ -1489,60 +2060,6 @@ function TentInterior({
           decay={2}
         />
       )}
-
-      {/* Cushion on the floor in front of the bench — the seat. */}
-      <Prop
-        parts={kit.parts('Pillow7')}
-        position={[0, 0.02, BENCH.z + 0.88]}
-        rotation={0.24}
-        scale={0.78}
-        cast={false}
-      />
-
-      {/* Shelf against the right-hand wall, turned so its open face looks back
-          at the doorway, with the pack's glassware on the tiers. Plus the pack
-          in the back corner and the cushions heaped in the front one. None of
-          it is on screen until the camera is inside — see `dressed`.
-
-          Hidden rather than unmounted. Every one of these carries a material
-          the scene uses nowhere else, and a material that first appears in the
-          frame where a tent is clicked is a shader the driver has to compile in
-          that frame — which is a stall, right where the walk-in should be
-          smooth. Mounted from the start they are compiled during the loading
-          screen instead (three's `compile` walks the whole scene, visible or
-          not), and an invisible object is skipped whole at render time, so it
-          costs nothing per frame until it is shown. */}
-      <group visible={dressed}>
-          <Prop
-            parts={kit.parts('Shelf')}
-            position={[ROOM_HALF_W - 0.45, 0, -0.16]}
-            rotation={Math.PI / 2}
-            scale={0.42}
-            cast={false}
-          />
-          <Prop parts={kit.parts('Jar')} position={[1.02, 0.31, -0.36]} rotation={0.6} scale={0.7} cast={false} />
-          <Prop parts={kit.parts('Potion')} position={[1.02, 0.32, -0.1]} rotation={0.2} scale={0.95} cast={false} />
-          <Prop parts={kit.parts('Jar')} position={[1.06, 0.31, 0.12]} rotation={-1.1} scale={0.6} cast={false} />
-          <Prop parts={kit.parts('Potion')} position={[1.04, 0.63, -0.3]} rotation={-0.5} scale={0.85} cast={false} />
-          <Prop parts={kit.parts('Jar')} position={[1.04, 0.62, 0.02]} rotation={1.4} scale={0.55} cast={false} />
-          <Prop
-            parts={kit.parts('Backpack')}
-            position={[-1.22, 0, ROOM_BACK + 0.25]}
-            rotation={-0.8}
-            scale={0.85}
-            cast={false}
-          />
-          {corner.map((c, i) => (
-            <Prop
-              key={i}
-              parts={kit.parts(c.part)}
-              position={c.pos}
-              rotation={c.rotation}
-              scale={c.scale}
-              cast={false}
-            />
-          ))}
-      </group>
     </group>
   )
 }
@@ -1558,13 +2075,19 @@ function Tent({
   bookOpen,
   roomLit,
   deep,
+  exteriorHoverReady,
   rig,
   onEnter,
   onHover,
   onNavigate,
   onZoom,
   onBookOpenRequest,
+  bookHovered,
+  onBookHover,
+  registerBookOutlineTarget,
   onClose,
+  registerOutlineTarget,
+  onShadowTransformChange,
 }: {
   index: number
   focus: React.RefObject<number>
@@ -1576,6 +2099,8 @@ function Tent({
   roomLit: boolean
   /** True only once the camera is right up at a journal — the light budget. */
   deep: boolean
+  /** Shared one-second post-exit gate for both outline and hover scaling. */
+  exteriorHoverReady: boolean
   /** The camera rig's own state, read per frame to drive the interior fade. */
   rig: React.RefObject<RigState>
   hovered: number | null
@@ -1586,15 +2111,37 @@ function Tent({
   onZoom?: (src: string, from: PageScreenRect) => void
   /** Fired when the reader clicks this tent's closed journal. */
   onBookOpenRequest: () => void
+  bookHovered: boolean
+  onBookHover: (index: number, hovered: boolean) => void
+  registerBookOutlineTarget: (index: number, node: THREE.Object3D | null) => void
   /** Fired when the journal is closed from its own edge page. */
   onClose: () => void
+  /** Registers the rendered tent's drawable meshes with the screen-space outline. */
+  registerOutlineTarget: (index: TentIndex, node: THREE.Object3D | null) => void
+  /** Marks the shared moon shadow map dirty while this tent's caster transform moves. */
+  onShadowTransformChange: () => void
 }) {
-  const kit = useKit()
+  // All three tents use the clean blue-painted Blender source. Runtime tinting
+  // changes only its canvas pixels, preserving authored leather and wood.
+  const cabin = useGLTF(CABIN_BLUE_URL)
+  const [cloth, leather] = useTexture([
+    TENT_CLOTH,
+    TENT_LEATHER_GRAIN,
+  ])
   const group = useRef<THREE.Group>(null)
   const body = useRef<THREE.Group>(null)
+  const setBody = useCallback(
+    (node: THREE.Group | null) => {
+      body.current = node
+      registerOutlineTarget(index as TentIndex, node)
+    },
+    [index, registerOutlineTarget]
+  )
   /** Hover highlight, 0-1, damped per frame. */
   const glow = useRef(0)
+  const appliedGlow = useRef(Number.NaN)
   const lantern = useRef<THREE.PointLight>(null)
+  const lanternSpill = useRef<THREE.SpotLight>(null)
   const glowLight = useRef<THREE.PointLight>(null)
   const readLight = useRef<THREE.PointLight>(null)
   /**
@@ -1613,86 +2160,562 @@ function Tent({
    */
   const inside = useRef(0)
 
-  const neon = useMemo(() => new THREE.Color(TENT_NEON[index]), [index])
+  const highlightColor = useMemo(() => new THREE.Color(TENT_TINT[index]), [index])
   /** Lamp colour for this tent — see the light itself. */
-  const lampColor = useMemo(
-    () => new THREE.Color('#ffab5e').lerp(new THREE.Color(TENT_NEON[index]), 0.32),
-    [index]
-  )
-
+  const lampColor = TENT_INTERIOR_LIGHT
   const parts = useMemo(() => {
-    // Rougher than cloth would be, but not matte. At 0.92 the canvas took no
-    // specular at all, so the rim light passed straight over the folds and
-    // every wall came out as one flat panel of colour; a little sheen is what
-    // makes the seams and the sag read.
-    //
-    // LIGHTING-REWORK (2026-08-17): 0.74 -> 0.9. That note was written
-    // against rim 0.62/moon 1.55 — at the much brighter values now baked in
-    // (moon 4, rim 2, hemisphere ground '#ffffff' @ 1.0), the same 0.74
-    // roughness put a blown-white Fresnel highlight on any grazing-angle
-    // surface — thin guy-ropes especially, reported as "metallic white
-    // streaks" and reproduced with moon/rim off (hemisphere + the much
-    // stronger campfire light alone are enough). Metalness is 0 on this
-    // material (checked the source glb) — this was never a metal-material
-    // bug, just a specular lobe sized for a dimmer scene.
-    //
-    // LIGHTING-REWORK (2026-08-17): 0.9 -> 1.0, then back to 0.9. Flattening
-    // the material to its matte ceiling was an attempt at the white edge on
-    // the ropes and trim while `specularIntensity` in useKit() was silently
-    // never being applied (that block threw — see the note there). With the
-    // reflectance itself now pinned at 0.15 the edge is gone at 0.9 too, and
-    // 0.9 is what puts the weave, the seams and the sag back on the canvas:
-    // at 1.0 every wall is one flat panel of colour again, which is exactly
-    // what the note above this one was written about. Does not touch the
-    // hover highlight either way: that's a wholly
-    // separate unlit emissive shell (`makeOutlineShell`, see
-    // campsite/outline.ts) plus an emissive wash on `glowParts` below,
-    // neither of which reads `roughness` at all.
-    const list = tintParts(kit.parts(TENT.node), TENT_TINT[index], {
-      roughness: 0.9,
-      side: THREE.DoubleSide,
-      emissive: new THREE.Color('#000000'),
-    })
-    /*
-      VISUAL-13.7 (2026-08-30): the tent's second material slot is not fabric
-      and must not take the fabric's colour.
-
-      `Tent_1` carries the frame, the guy ropes and the stakes, and `tintParts`
-      was painting all of it the tent's own tint — so each tent's ropes were
-      three-metre lines of saturated red, blue or yellow drawn across the frame
-      at one pixel wide. That is why they read as an interface overlay rather
-      than as cord. Rope brown, matte, and it now takes the lanterns' and the
-      fire's light like the rest of the camp.
-
-      Thickness and sag are not fixed here: the ropes are baked into the same
-      primitive as the frame in campsite-kit.glb, so re-running them as tubes
-      along a sagging curve means re-authoring the model. See INCOMPLETE in
-      VISUAL_CHANGES.md.
-    */
-    for (const p of list) {
-      if (p.material.name === 'Tent_1') {
-        p.material.color = new THREE.Color('#8b6f47')
-        p.material.roughness = 1
-        p.material.metalness = 0
-      }
+    // CSS hex input is sRGB; THREE.Color converts it to the renderer's linear
+    // working space. Keep the specified design colours exact at this boundary.
+    const tint = new THREE.Color(TENT_TINT[index])
+    const woodTint = new THREE.Color(TENT_WOOD)
+    // Every Fabric030 map is scalar data. Trilinear mipmaps and anisotropy are
+    // important here because the weave is deliberately much finer than a pixel
+    // in the campsite camera.
+    for (const texture of [cloth]) {
+      texture.wrapS = THREE.RepeatWrapping
+      texture.wrapT = THREE.RepeatWrapping
+      texture.colorSpace = THREE.NoColorSpace
+      texture.generateMipmaps = true
+      texture.minFilter = THREE.LinearMipmapLinearFilter
+      texture.magFilter = THREE.LinearFilter
+      texture.anisotropy = 8
+      texture.needsUpdate = true
     }
-    return list
-  }, [kit, index])
+    return collectParts(cabin.scene).map(({ geometry, material }, partIndex) => {
+      const source = material as THREE.MeshStandardMaterial
+      const m = source.clone()
+      const isCloth = source.name.includes('Tent_Canvas')
+      const isRibbon = source.name.includes('Tent_Ribbon_Leather')
+      const isBakedDetail = source.name.includes('Tent_Baked_Details')
+      const isReferenceTent = source.name.includes('Tent_Reference_Baked')
+      const isBluePaintedReference = source.name.includes('Tent_Reference_Baked_Blue')
+      const role = isReferenceTent
+        ? 'ReferenceBaked'
+        : isCloth
+          ? 'Cloth'
+          : isRibbon
+            ? 'RibbonLeather'
+            : isBakedDetail
+              ? 'BakedDetails'
+              : 'Wood'
+      m.name = `CanvasCabin_${role}_${index}_${partIndex}`
+      m.metalness = 0
+      m.side = THREE.DoubleSide
+      m.emissive = new THREE.Color('#000000')
+      // Meshy's emissive atlas contains isolated white flecks. They became
+      // visible whenever the tent hover lift enabled emissive colour, including
+      // on the rear canvas and at the leather/canvas UV boundary. The authored
+      // campsite lights and hover hull provide all intended glow.
+      m.emissiveMap = null
+      m.emissiveIntensity = 1
+      if (m.map) {
+        m.map.anisotropy = 8
+        m.map.needsUpdate = true
+      }
 
-  /**
-   * `parts` minus the window sash — see tools/export-campsite.py's
-   * `mark_faces_by_bbox`, which split the sash onto its own material slot
-   * (named `Tent_1`) for exactly this reason. The sash is real geometry with
-   * its own silhouette, so the hover hull (below) outlined it exactly as
-   * brightly as the roofline it exists to draw attention to instead. It
-   * still renders normally in `parts` above — only the extra hover wash and
-   * hull outline skip it.
-   */
-  const glowParts = useMemo(() => parts.filter((p) => p.material.name !== 'Tent_1'), [parts])
+      if (isReferenceTent) {
+        // Ground truth: the optimized Meshy reference is one connected mesh
+        // with one continuous baked atlas. Keep its UV-defined leather/wood
+        // boundaries intact and tint only the light canvas texels per pixel.
+        // This avoids every triangle-edge seam introduced by material splits.
+        m.color.set('#ffffff')
+        m.metalness = 0
+        m.metalnessMap = null
+        m.roughness = 0.96
+        m.roughnessMap = null
+        m.envMapIntensity = 0.18
+        if (m.normalMap) {
+          m.normalMap.anisotropy = 8
+          m.normalMap.needsUpdate = true
+        }
+        m.onBeforeCompile = (shader) => {
+          shader.uniforms.uCabinTint = { value: tint }
+          shader.uniforms.uReferenceRibbonTint = { value: new THREE.Color(TENT_RIBBON) }
+          shader.uniforms.uClothMap = { value: cloth }
+          shader.uniforms.uClothScale = { value: TENT_CLOTH_SCALE }
+          shader.uniforms.uFabricStrength = { value: TENT_FABRIC_COLOR_STRENGTH }
+          shader.uniforms.uCanvasNormalStrength = { value: TENT_FABRIC_NORMAL_STRENGTH }
+          shader.uniforms.uFabricRoughnessStrength = {
+            value: TENT_FABRIC_ROUGHNESS_STRENGTH,
+          }
+          shader.uniforms.uFabricAoStrength = { value: TENT_FABRIC_AO_STRENGTH }
+          shader.vertexShader = shader.vertexShader
+            .replace(
+              'void main() {',
+              'varying vec3 vReferencePosition;\nvarying vec3 vReferenceNormal;\nvoid main() {'
+            )
+            .replace(
+              '#include <beginnormal_vertex>',
+              '#include <beginnormal_vertex>\nvReferenceNormal = normalize(objectNormal);'
+            )
+            .replace(
+              '#include <begin_vertex>',
+              '#include <begin_vertex>\nvReferencePosition = position;'
+            )
+          shader.fragmentShader = shader.fragmentShader
+            .replace(
+              'void main() {',
+              `uniform vec3 uCabinTint;
+uniform vec3 uReferenceRibbonTint;
+uniform sampler2D uClothMap;
+uniform float uClothScale;
+uniform float uFabricStrength;
+uniform float uCanvasNormalStrength;
+uniform float uFabricRoughnessStrength;
+uniform float uFabricAoStrength;
+varying vec3 vReferencePosition;
+varying vec3 vReferenceNormal;
 
-  /** The neon edge, drawn as a swollen back-faced copy. See campsite/outline. */
-  const shell = useMemo(() => makeOutlineShell(neon), [neon])
-  const shellGroup = useRef<THREE.Group>(null)
+vec3 perturbReferenceCanvasNormal(
+  vec3 surfPosition,
+  vec3 surfNormal,
+  vec2 heightGradient,
+  float side
+) {
+  vec3 sigmaX = normalize(dFdx(surfPosition));
+  vec3 sigmaY = normalize(dFdy(surfPosition));
+  vec3 r1 = cross(sigmaY, surfNormal);
+  vec3 r2 = cross(surfNormal, sigmaX);
+  float determinant = dot(sigmaX, r1) * side;
+  vec3 gradient = sign(determinant) * (heightGradient.x * r1 + heightGradient.y * r2);
+  return normalize(abs(determinant) * surfNormal - gradient);
+}
+
+void main() {`
+            )
+            .replace(
+              '#include <map_fragment>',
+              `#include <map_fragment>
+               float referenceLuma = dot(
+                 diffuseColor.rgb,
+                 vec3(0.2126, 0.7152, 0.0722)
+               );
+               float referenceChannelSum = diffuseColor.r + diffuseColor.g + diffuseColor.b;
+               float referenceBlueShare = diffuseColor.b / max(referenceChannelSum, 0.001);
+               float referenceCanvasMask = ${isBluePaintedReference
+                 ? 'smoothstep(0.34, 0.39, referenceBlueShare)'
+                 : 'smoothstep(0.28, 0.48, referenceLuma)'};
+               float referenceAbsX = abs(vReferencePosition.x);
+               float referenceInnerBeamX = 0.207 - 0.70 * vReferencePosition.y;
+               float referenceStrapCenterY = 0.13 * referenceAbsX - 0.131;
+               float referenceEndpointX = smoothstep(
+                 referenceInnerBeamX - 0.032,
+                 referenceInnerBeamX - 0.020,
+                 referenceAbsX
+               ) * (1.0 - smoothstep(
+                 referenceInnerBeamX + 0.006,
+                 referenceInnerBeamX + 0.018,
+                 referenceAbsX
+               ));
+               float referenceEndpointY = 1.0 - smoothstep(
+                 0.035,
+                 0.045,
+                 abs(vReferencePosition.y - referenceStrapCenterY)
+               );
+               float referenceFront = smoothstep(0.26, 0.32, vReferencePosition.z);
+               float referenceBrightGap = ${isBluePaintedReference
+                 ? '0.0'
+                 : 'smoothstep(0.30, 0.52, referenceLuma)'};
+               float referenceEndpointRepair = referenceEndpointX
+                 * referenceEndpointY * referenceFront * referenceBrightGap;
+               referenceCanvasMask *= 1.0 - referenceEndpointRepair;
+               float referenceCanvasSurface = clamp(
+                  referenceLuma / ${isBluePaintedReference ? '0.06392' : '0.58'},
+                  0.72,
+                  1.12
+                );
+               vec3 referenceBlend = pow(abs(normalize(vReferenceNormal)), vec3(6.0));
+               referenceBlend /= max(
+                 referenceBlend.x + referenceBlend.y + referenceBlend.z,
+                 0.001
+               );
+               vec4 referenceFabricX = texture2D(
+                 uClothMap,
+                 vReferencePosition.yz * uClothScale
+               );
+               vec4 referenceFabricY = texture2D(
+                 uClothMap,
+                 vReferencePosition.xz * uClothScale
+               );
+               vec4 referenceFabricZ = texture2D(
+                 uClothMap,
+                 vReferencePosition.xy * uClothScale
+               );
+               float referenceWeave = dot(
+                 vec3(referenceFabricX.r, referenceFabricY.r, referenceFabricZ.r),
+                 referenceBlend
+               );
+               float referenceHeight = dot(vec3(
+                 referenceFabricX.g,
+                 referenceFabricY.g,
+                 referenceFabricZ.g
+               ), referenceBlend);
+               float referenceFabricRoughness = dot(vec3(
+                 referenceFabricX.b,
+                 referenceFabricY.b,
+                 referenceFabricZ.b
+               ), referenceBlend);
+               float referenceFabricAo = dot(vec3(
+                 referenceFabricX.a,
+                 referenceFabricY.a,
+                 referenceFabricZ.a
+               ), referenceBlend);
+               float referenceThread = smoothstep(0.27, 0.73, referenceWeave);
+               float referenceFabricSurface = mix(
+                 1.0,
+                 mix(0.93, 1.07, referenceThread),
+                 uFabricStrength
+               );
+               referenceFabricSurface *= mix(
+                 1.0,
+                 mix(0.97, 1.01, referenceFabricAo),
+                 uFabricAoStrength
+               );
+               diffuseColor.rgb = mix(
+                  diffuseColor.rgb,
+                  uCabinTint * referenceCanvasSurface * referenceFabricSurface,
+                  referenceCanvasMask
+                );
+               diffuseColor.rgb = mix(
+                 diffuseColor.rgb,
+                 uReferenceRibbonTint,
+                 referenceEndpointRepair
+               );`
+            )
+            .replace(
+              '#include <roughnessmap_fragment>',
+              `#include <roughnessmap_fragment>
+               roughnessFactor = clamp(
+                 mix(
+                   roughnessFactor,
+                   mix(0.84, 1.0, referenceFabricRoughness),
+                   uFabricRoughnessStrength * referenceCanvasMask
+                 ),
+                 0.0,
+                 1.0
+               );`
+            )
+            .replace(
+              '#include <normal_fragment_maps>',
+              `#include <normal_fragment_maps>
+               vec2 referenceHeightGradient = vec2(
+                 dFdx(referenceHeight),
+                 dFdy(referenceHeight)
+               );
+               normal = perturbReferenceCanvasNormal(
+                 -vViewPosition,
+                 normal,
+                   referenceHeightGradient * uCanvasNormalStrength
+                    * referenceCanvasMask,
+                 faceDirection
+               );`
+            )
+            .replace(
+              '#include <opaque_fragment>',
+              `vec3 referenceCanvasCeiling =
+                 uCabinTint * 1.18 * referenceFabricSurface + vec3(0.018);
+               outgoingLight = mix(
+                 outgoingLight,
+                 min(outgoingLight, referenceCanvasCeiling),
+                 referenceCanvasMask
+               );
+               #include <opaque_fragment>`
+            )
+        }
+      } else if (isCloth) {
+        // The repaired GLB keeps canvas in its own primitive. A low-frequency
+        // triplanar weave avoids depending on the source atlas or stretched UVs.
+        m.color.set('#ffffff')
+        m.map = null
+        m.normalMap = null
+        m.normalScale.set(TENT_CANVAS.normalStrength, TENT_CANVAS.normalStrength)
+        m.roughness = TENT_CANVAS.roughness
+        m.roughnessMap = null
+        m.metalness = TENT_CANVAS.metalness
+        m.metalnessMap = null
+        m.envMapIntensity = TENT_CANVAS.envMapIntensity
+        m.aoMapIntensity = TENT_CANVAS.aoMapIntensity
+        m.onBeforeCompile = (shader) => {
+          shader.uniforms.uCabinTint = { value: tint }
+          shader.uniforms.uRibbonTint = { value: new THREE.Color(TENT_RIBBON) }
+          shader.uniforms.uClothMap = { value: cloth }
+          shader.uniforms.uLeatherMap = { value: leather }
+          shader.uniforms.uClothScale = { value: TENT_CLOTH_SCALE }
+          shader.uniforms.uCanvasNormalStrength = { value: TENT_CANVAS.normalStrength }
+          shader.vertexShader = shader.vertexShader
+            .replace(
+              'void main() {',
+              'varying vec3 vCabinObjectPosition;\nvarying vec3 vCabinObjectNormal;\nvoid main() {'
+            )
+            .replace(
+              '#include <beginnormal_vertex>',
+              '#include <beginnormal_vertex>\nvCabinObjectNormal = normalize(objectNormal);'
+            )
+            .replace(
+              '#include <begin_vertex>',
+              '#include <begin_vertex>\nvCabinObjectPosition = position;'
+            )
+          shader.fragmentShader = shader.fragmentShader
+            .replace(
+              'void main() {',
+              `uniform vec3 uCabinTint;
+uniform vec3 uRibbonTint;
+uniform sampler2D uClothMap;
+uniform sampler2D uLeatherMap;
+uniform float uClothScale;
+uniform float uCanvasNormalStrength;
+varying vec3 vCabinObjectPosition;
+varying vec3 vCabinObjectNormal;
+
+vec3 perturbCabinCanvasNormal(vec3 surfPosition, vec3 surfNormal, vec2 heightGradient, float side) {
+  vec3 sigmaX = normalize(dFdx(surfPosition));
+  vec3 sigmaY = normalize(dFdy(surfPosition));
+  vec3 r1 = cross(sigmaY, surfNormal);
+  vec3 r2 = cross(surfNormal, sigmaX);
+  float determinant = dot(sigmaX, r1) * side;
+  vec3 gradient = sign(determinant) * (heightGradient.x * r1 + heightGradient.y * r2);
+  return normalize(abs(determinant) * surfNormal - gradient);
+}
+
+void main() {`
+            )
+            .replace(
+              '#include <map_fragment>',
+              `#include <map_fragment>
+               vec3 cabinBlend = pow(abs(normalize(vCabinObjectNormal)), vec3(6.0));
+               cabinBlend /= max(cabinBlend.x + cabinBlend.y + cabinBlend.z, 0.001);
+               float cabinWeaveX = texture2D(uClothMap, vCabinObjectPosition.yz * uClothScale).r;
+               float cabinWeaveY = texture2D(uClothMap, vCabinObjectPosition.xz * uClothScale).r;
+               float cabinWeaveZ = texture2D(uClothMap, vCabinObjectPosition.xy * uClothScale).r;
+               float cabinWeave = dot(vec3(cabinWeaveX, cabinWeaveY, cabinWeaveZ), cabinBlend);
+               float cabinThread = smoothstep(0.22, 0.78, cabinWeave);
+               float cabinLowerEdge = 1.0 - smoothstep(-0.40, -0.19, vCabinObjectPosition.y);
+               float cabinDirt = cabinLowerEdge * mix(0.06, 0.12, 1.0 - cabinThread);
+               float cabinSurface = mix(0.98, 1.012, cabinThread);
+               diffuseColor.rgb = uCabinTint * cabinSurface * (1.0 - cabinDirt);
+               float canvasAbsX = abs(vCabinObjectPosition.x);
+               float canvasInnerBeamX = 0.207 - 0.70 * vCabinObjectPosition.y;
+               float canvasFront = smoothstep(0.27, 0.31, vCabinObjectPosition.z);
+               float canvasStrapCenterY = 0.13 * canvasAbsX - 0.131;
+               float canvasStrapStart = smoothstep(0.112, 0.122, canvasAbsX);
+               float canvasStrapEnd = 1.0 - smoothstep(
+                 canvasInnerBeamX - 0.010,
+                 canvasInnerBeamX + 0.002,
+                 canvasAbsX
+               );
+               float canvasStrapBand = 1.0 - smoothstep(
+                 0.014,
+                 0.020,
+                 abs(vCabinObjectPosition.y - canvasStrapCenterY)
+               );
+               float canvasStrapMask = canvasFront * canvasStrapStart
+                 * canvasStrapEnd * canvasStrapBand;
+               float canvasStrapLength = max(canvasInnerBeamX - 0.105, 0.001);
+               vec2 canvasLeatherUv = vec2(
+                 mix(0.15, 0.85, clamp(
+                   (canvasAbsX - 0.115) / canvasStrapLength,
+                   0.0,
+                   1.0
+                 )),
+                 mix(0.20, 0.80, clamp(
+                   (vCabinObjectPosition.y - canvasStrapCenterY + 0.020) / 0.040,
+                   0.0,
+                   1.0
+                 ))
+               );
+               vec3 canvasLeatherSample = texture2D(uLeatherMap, canvasLeatherUv).rgb;
+               float canvasLeatherLuma = dot(
+                 canvasLeatherSample,
+                 vec3(0.2126, 0.7152, 0.0722)
+               );
+               float canvasLeatherGrain = clamp(canvasLeatherLuma / 0.055, 0.82, 1.16);
+               diffuseColor.rgb = mix(
+                 diffuseColor.rgb,
+                 uRibbonTint * canvasLeatherGrain,
+                 canvasStrapMask
+               );`
+            )
+            .replace(
+              '#include <roughnessmap_fragment>',
+              `#include <roughnessmap_fragment>
+               roughnessFactor = mix(
+                 roughnessFactor,
+                 ${TENT_RIBBON_ROUGHNESS.toFixed(2)},
+                 canvasStrapMask
+               );`
+            )
+            .replace(
+              '#include <normal_fragment_maps>',
+              `#include <normal_fragment_maps>
+               vec2 cabinHeightGradient = vec2(dFdx(cabinWeave), dFdy(cabinWeave));
+               normal = perturbCabinCanvasNormal(
+                 -vViewPosition,
+                 normal,
+                 cabinHeightGradient * uCanvasNormalStrength,
+                 faceDirection
+               );`
+            )
+            .replace(
+              '#include <opaque_fragment>',
+              `vec3 cabinCanvasCeiling = uCabinTint * 1.16 + vec3(0.015);
+               outgoingLight = min(outgoingLight, cabinCanvasCeiling);
+               #include <opaque_fragment>`
+            )
+        }
+      } else if (isRibbon) {
+        // Original strap faces keep their authored size and position; the
+        // repaired material uses a clean crop of the model's leather atlas.
+        m.color.set(m.map ? '#ffffff' : TENT_RIBBON)
+        m.normalMap = null
+        m.roughness = TENT_RIBBON_ROUGHNESS
+        m.roughnessMap = null
+        m.metalnessMap = null
+        m.envMapIntensity = 0.24
+      } else if (isBakedDetail) {
+        // The Meshy source combines the wooden frame and leather ties in one
+        // atlas. Keep that full PBR texture set untouched: only the separately
+        // exported Tent_Canvas primitive receives the three runtime tints.
+        m.color.set('#ffffff')
+        m.metalness = 0
+        m.metalnessMap = null
+        // Meshy's packed roughness makes the poles read as varnished under the
+        // torches. The colour and normal maps carry the useful wood/leather
+        // grain; a high uniform roughness keeps both materials naturally matte.
+        m.roughness = 0.96
+        m.roughnessMap = null
+        m.envMapIntensity = 0.18
+        if (m.normalMap) {
+          m.normalMap.anisotropy = 8
+          m.normalMap.needsUpdate = true
+        }
+        // A few decimated triangles cross the canvas/leather atlas boundary.
+        // Tint their light canvas texels per pixel while leaving the dark strap
+        // and wood texels fully baked, so no beige wedges appear beside a tie.
+        m.onBeforeCompile = (shader) => {
+          shader.uniforms.uCabinTint = { value: tint }
+          shader.uniforms.uRibbonTint = { value: new THREE.Color(TENT_RIBBON) }
+          shader.uniforms.uClothMap = { value: cloth }
+          shader.uniforms.uLeatherMap = { value: leather }
+          shader.uniforms.uClothScale = { value: TENT_CLOTH_SCALE }
+          shader.vertexShader = shader.vertexShader
+            .replace(
+              'void main() {',
+              'varying vec3 vCabinObjectPosition;\nvoid main() {'
+            )
+            .replace(
+              '#include <begin_vertex>',
+              '#include <begin_vertex>\nvCabinObjectPosition = position;'
+            )
+          shader.fragmentShader = shader.fragmentShader
+            .replace(
+              'void main() {',
+              `uniform vec3 uCabinTint;
+uniform vec3 uRibbonTint;
+uniform sampler2D uClothMap;
+uniform sampler2D uLeatherMap;
+uniform float uClothScale;
+varying vec3 vCabinObjectPosition;
+
+void main() {`
+            )
+            .replace(
+              '#include <map_fragment>',
+              `#include <map_fragment>
+               float cabinAbsX = abs(vCabinObjectPosition.x);
+               float cabinInnerBeamX = 0.207 - 0.70 * vCabinObjectPosition.y;
+               float cabinFront = smoothstep(0.27, 0.31, vCabinObjectPosition.z);
+               float cabinVertical = smoothstep(-0.39, -0.37, vCabinObjectPosition.y)
+                 * (1.0 - smoothstep(0.31, 0.33, vCabinObjectPosition.y));
+               float strapCenterY = 0.13 * cabinAbsX - 0.131;
+               float strapStart = smoothstep(0.112, 0.122, cabinAbsX);
+               float strapEnd = 1.0 - smoothstep(
+                 cabinInnerBeamX - 0.010,
+                 cabinInnerBeamX + 0.002,
+                 cabinAbsX
+               );
+               float strapBand = 1.0 - smoothstep(
+                 0.014,
+                 0.020,
+                 abs(vCabinObjectPosition.y - strapCenterY)
+               );
+               float strapMask = cabinFront * cabinVertical * strapStart * strapEnd * strapBand;
+               float strapVicinity = 1.0 - smoothstep(
+                 0.024,
+                 0.045,
+                 abs(vCabinObjectPosition.y - strapCenterY)
+               );
+               float canvasWoodMargin = mix(0.040, 0.008, strapVicinity);
+               float canvasInterior = 1.0 - smoothstep(
+                 cabinInnerBeamX - canvasWoodMargin - 0.010,
+                 cabinInnerBeamX - canvasWoodMargin,
+                 cabinAbsX
+               );
+               float strayCanvas = cabinFront * cabinVertical * canvasInterior
+                 * (1.0 - strapMask);
+               float bakedWeave = texture2D(
+                 uClothMap,
+                 vCabinObjectPosition.xy * uClothScale
+               ).r;
+               float bakedThread = smoothstep(0.22, 0.78, bakedWeave);
+               float bakedCanvasSurface = mix(0.98, 1.012, bakedThread);
+               diffuseColor.rgb = mix(
+                 diffuseColor.rgb,
+                 uCabinTint * bakedCanvasSurface,
+                 strayCanvas
+               );`
+            )
+            .replace(
+              '#include <color_fragment>',
+              `#include <color_fragment>
+               float strapLength = max(cabinInnerBeamX - 0.105, 0.001);
+               vec2 leatherUv = vec2(
+                 mix(0.15, 0.85, clamp((cabinAbsX - 0.115) / strapLength, 0.0, 1.0)),
+                 mix(0.20, 0.80, clamp(
+                   (vCabinObjectPosition.y - strapCenterY + 0.020) / 0.040,
+                   0.0,
+                   1.0
+                 ))
+               );
+               vec3 leatherSample = texture2D(uLeatherMap, leatherUv).rgb;
+               float leatherLuma = dot(leatherSample, vec3(0.2126, 0.7152, 0.0722));
+               float leatherGrain = clamp(leatherLuma / 0.055, 0.82, 1.16);
+               diffuseColor.rgb = mix(
+                 diffuseColor.rgb,
+                 uRibbonTint * leatherGrain,
+                 strapMask
+               );`
+            )
+            .replace(
+              '#include <opaque_fragment>',
+              `vec3 bakedCanvasCeiling = uCabinTint * 1.16 + vec3(0.015);
+               outgoingLight = mix(
+                 outgoingLight,
+                 min(outgoingLight, bakedCanvasCeiling),
+                 strayCanvas
+               );
+               #include <opaque_fragment>`
+            )
+        }
+      } else {
+        m.color.copy(woodTint)
+        m.map = null
+        m.normalMap = null
+        m.roughness = TENT_WOOD_ROUGHNESS
+        m.roughnessMap = null
+        m.metalnessMap = null
+        m.envMapIntensity = TENT_CANVAS.envMapIntensity
+      }
+      m.customProgramCacheKey = () =>
+        `canvas-cabin-${role.toLowerCase()}-painted-v7-${TENT_FABRIC_PREVIEW ? 'fabric030-packed' : 'plain'}`
+      ALL_STANDARD_MATERIALS.push(m)
+      TENT_MATERIALS.push(m)
+      return { geometry, material: m }
+    })
+  }, [cabin, cloth, leather, index])
+
+  useEffect(() => () => parts.forEach((p) => p.material.dispose()), [parts])
+
+  const glowParts = parts
 
   const isHovered = hovered === index
   const entering = entered === index
@@ -1718,6 +2741,7 @@ function Tent({
   useFrame((state, delta) => {
     const g = group.current
     if (!g) return
+    let shadowTransformChanged = false
     const near = clamp01(1 - Math.abs(focus.current - index))
     /*
       The focus rise is a lobby affordance, and it has to stop at the doorway.
@@ -1731,7 +2755,11 @@ function Tent({
       the top of the shot while About and Projects sat centred.
     */
     const rise = entered === null ? near * 0.05 : 0
-    g.position.y += (rise - g.position.y) * damp(5, delta)
+    const nextY = g.position.y + (rise - g.position.y) * damp(5, delta)
+    if (nextY !== g.position.y) {
+      g.position.y = nextY
+      shadowTransformChanged = true
+    }
 
     // How far in the camera is. Held at zero for the two tents it is not
     // walking into, so their interiors never light.
@@ -1744,26 +2772,26 @@ function Tent({
     const k = active ? smoothstep(0.62, 0.99, easeInOutCubic(clamp01(rig.current.travel))) : 0
     inside.current = k
 
-    // Gates the hover highlight/scale back on once the camera is back outside
-    // the tent, not the instant `entered` goes null. `entered` flips at the
-    // ESC key, but the camera is still backing out and the book is still (or
-    // has just finished) closing — `entered === null` alone let the tent puff
-    // up and glow while that was still playing.
-    //
-    // 0.47 is the doorway threshold `CameraRig` itself uses for "back outside,
-    // still walking away" (the raw travel at which its eased split crosses
-    // 0.42 — see the duck-through leg there): past that point the lens has
-    // cleared the flap, so the highlight can come back while the camera is
-    // still finishing its walk to the resting pose instead of waiting for it
-    // to actually arrive. Only the tent just exited has a travel to wait out;
-    // the other two were never toured, so they're not held back.
-    const settled = !active || rig.current.travel < 0.47
+    // Outline and scale read the exact same one-second post-exit gate. Keeping
+    // separate travel thresholds here made one response return well before the
+    // other, so the tent looked like it changed interaction modes twice.
+    const hoverEnabled = entered === null && exteriorHoverReady
     const b = body.current
     if (b) {
-      const target = isHovered && entered === null && settled ? 1.03 : 1
+      const target = isHovered && hoverEnabled ? 1.03 : 1
       const s = THREE.MathUtils.lerp(b.scale.x / TENT.scale, target, damp(7.7, delta)) * TENT.scale
-      b.scale.setScalar(s)
+      if (s !== b.scale.x || s !== b.scale.y || s !== b.scale.z) {
+        b.scale.setScalar(s)
+        shadowTransformChanged = true
+      }
+      if (import.meta.env.DEV) {
+        const w = window as unknown as {
+          __tentHover?: { enabled: boolean; scale: number }[]
+        }
+        ;(w.__tentHover ??= [])[index] = { enabled: hoverEnabled, scale: s / TENT.scale }
+      }
     }
+    if (shadowTransformChanged) onShadowTransformChange()
 
     /*
       The hover highlight. Steady, not pulsing — a sine on `state.clock.
@@ -1776,9 +2804,9 @@ function Tent({
       material through `onBeforeCompile` — and it was the thing that put a pale
       wash across the whole roof of a hovered tent, because a roof seen from the
       clearing is at a grazing angle and a Fresnel rim is at its brightest
-      exactly there. The outline that is wanted is the hull in `campsite/
-      outline.ts`; a rim cannot draw one on flat panels and only ever muddied
-      the fabric underneath it.
+      exactly there. The outline that is wanted is the single perimeter in
+      `campsite/outline.ts`; a rim cannot draw one on flat panels and only ever
+      muddied the fabric underneath it.
 
       Worth knowing why this took two passes to see: the rim's uniform handles
       were built inside the `parts` memo and stashed on a ref, and React's
@@ -1792,8 +2820,7 @@ function Tent({
       The emissive lift that remains is a trace, not a wash, and it is written
       straight onto the materials the meshes are using.
     */
-    const hot =
-      FROZEN_HOT !== null ? FROZEN_HOT === index : isHovered && entered === null && settled
+    const hot = FROZEN_HOT !== null ? FROZEN_HOT === index : isHovered && hoverEnabled
     // Medium, and reached fast rather than eased in. A slow damp here used to
     // spend its first frames sitting under the bloom pass's threshold — a
     // bare outline with no halo — and only cross it a beat later, which read
@@ -1804,143 +2831,103 @@ function Tent({
     const want = hot ? 0.55 : 0
     const glowNow = THREE.MathUtils.lerp(glow.current, want, damp(40, delta))
     glow.current = glowNow
-    for (const p of glowParts) {
-      ;(p.material as THREE.MeshStandardMaterial).emissive
-        .copy(neon)
-        .multiplyScalar(glowNow * 0.018)
+    if (glowNow !== appliedGlow.current) {
+      appliedGlow.current = glowNow
+      for (const p of glowParts) {
+        ;(p.material as THREE.MeshStandardMaterial).emissive
+          .copy(highlightColor)
+          .multiplyScalar(glowNow * 0.018)
+      }
     }
-    shell.set(glowNow)
-    // Hidden outright below the threshold rather than drawn at zero: this is
-    // the one extra draw call in the hover, and there is no reason to pay it
-    // for the 99% of the scene's life when nothing is hovered. A hidden object
-    // still gets its program built by `Warmup`, which walks with `traverse`.
-    if (shellGroup.current) shellGroup.current.visible = glowNow > 0.004
-
     const flick = fireFlicker(state.clock.elapsedTime * 0.8 + index)
-    if (lantern.current) lantern.current.intensity = 2.2 * flick * k
+    // Let the visible wick light the room while the closed journal is being
+    // approached. As soon as the cover starts to lift, return this source to
+    // the exact 0.1 value the pages were tuned against; the overhead reading
+    // source and every page material remain unchanged. The short fade finishes
+    // before the printed faces are exposed, avoiding both a lighting pop and
+    // the old blown-paper/glass problem caused by an always-bright wick.
+    if (lantern.current) {
+      const pageProtection = smoothstep(0, 0.1, bookOpen.current)
+      lantern.current.intensity = THREE.MathUtils.lerp(0.72, 0.1, pageProtection) * flick * k
+    }
+    if (lanternSpill.current) lanternSpill.current.intensity = 3.2 * flick * k
     if (readLight.current) readLight.current.intensity = 0.6 * k
     if (glowLight.current) {
-      // The lamp burning inside the tent. Outside it is bright and sits low and
-      // back, so the whole canvas glows from within; from the reading pose it
-      // slides forward toward the doorway, well behind the lens, and drops to a
-      // level that keeps the dressing off black without adding to the page.
+      // A localized lamp at the entrance, not tent-wide transmission. It keeps
+      // the open doorway warm while the exterior canvas remains moon-lit PBR.
       // Ahead of the ramp, deliberately. The mid-point of a linear crossfade
       // between these two settings is brighter *and* closer to the bench than
       // either end, so the one frame the camera spends coming down over the
       // journal was the frame the bench was most blown out in.
       const g = Math.pow(k, 0.55)
       const l = glowLight.current
-      // 1.15 hung the lamp level with the bench, and the doorway is a low
-      // opening looking straight at it — so from the clearing the one thing
-      // visible through the door was a blown-out white bar. Lifting it puts the
-      // hotspot on the inside of the roof instead, where the door cannot see
-      // it, and the fabric still glows because that is the wall it is lighting.
-      l.position.set(0, THREE.MathUtils.lerp(1.62, 1.5, g), THREE.MathUtils.lerp(-0.3, 0.95, g))
+      // Keep the outside pose low and near the entrance. The short falloff
+      // warms the opening and flap edges without turning the roof into a lamp.
+      l.position.set(0, THREE.MathUtils.lerp(1.22, 1.5, g), THREE.MathUtils.lerp(0.18, 0.95, g))
       // `here` scales rather than unmounts — see MOUNTED_POINT_LIGHTS. A light
       // at zero intensity contributes exactly nothing, which is the same
       // picture the old `{here && …}` produced, at none of the cost.
-      l.intensity = here ? THREE.MathUtils.lerp(7.5, 0.9, g) : 0
-      l.distance = THREE.MathUtils.lerp(6.4, 5.2, g)
+      l.intensity = here ? THREE.MathUtils.lerp(1.35, 0.28, g) : 0
+      l.distance = THREE.MathUtils.lerp(2.6, 3.1, g)
     }
   })
 
   return (
     <group ref={group} position={[t.x, 0, t.z]} rotation-y={t.yaw}>
-      <group
-        ref={body}
-        scale={TENT.scale}
-        rotation-y={TENT.flip}
-        onClick={(e) => {
-          e.stopPropagation()
-          if (entered === null) onEnter(index as TentIndex)
-        }}
-        onPointerOver={(e) => {
-          e.stopPropagation()
-          onHover(index as TentIndex, 'tent')
-        }}
-        onPointerOut={() => onHover(null, 'tent')}
-      >
-        {parts.map((p, i) => (
-          <mesh key={i} geometry={p.geometry} material={p.material} castShadow receiveShadow />
-        ))}
-        {/* The hover outline. Same geometry, drawn once more — see
-            campsite/outline.ts for why it is a hull and not a rim or a pass. */}
-        <group ref={shellGroup} visible={false}>
-          {glowParts.map((p, i) => (
-            <mesh key={`o${i}`} geometry={p.geometry} material={shell.material} renderOrder={2} />
-          ))}
+        <group
+          ref={setBody}
+          scale={TENT.scale}
+          rotation-y={TENT.flip}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (entered === null) onEnter(index as TentIndex)
+          }}
+          onPointerOver={(e) => {
+            e.stopPropagation()
+            onHover(index as TentIndex, 'tent')
+          }}
+          onPointerOut={() => onHover(null, 'tent')}
+          onPointerLeave={() => onHover(null, 'tent')}
+          onPointerCancel={() => onHover(null, 'tent')}
+        >
+          <group position-y={TENT.rawBaseOffset}>
+            {parts.map((p, i) => (
+              <mesh key={i} geometry={p.geometry} material={p.material} castShadow receiveShadow />
+            ))}
+          </group>
         </group>
-      </group>
 
-      {/*
-        A light burning inside the tent.
-
-        The canvas is double-sided, so a source in the middle of the room lights
-        the *inside* of the walls and the fabric glows — which is what a lit tent
-        looks like from outside at night, and what the whole camp was missing:
-        three unlit shells standing in a dark clearing read as scenery, three
-        lit ones read as somewhere people are. Short reach, so it stays in its
-        own tent and never spills onto the grass.
-
-        It moves once the camera is inside. Left where it is, it sits a metre
-        above the journal and floods the open spread — the room has its own
-        reading light over the bench, sized for paper at arm's length, and the
-        two together blow the page to white. From the reading pose it hangs back
-        by the doorway instead, well behind the lens, where its job is to keep
-        the canvas and the dressing off black rather than to light the page.
-
-        Both moves are driven per frame off `inside`, not switched on a prop —
-        see the ref's own note.
-      */}
+      {/* Local entrance warmth. It moves behind the reading camera during the
+          walk-in so it cannot wash out the book; `inside` drives that smoothly. */}
       {/* Always mounted; `here` scales its intensity instead. See
           MOUNTED_POINT_LIGHTS. */}
       <pointLight
           ref={glowLight}
-          position={[0, 1.62, -0.3]}
-          /*
-            Warm, but carrying some of the tent's own colour.
-
-            The canvas is a single double-sided surface, so nothing in the
-            renderer models light passing *through* dyed cloth — and that is
-            most of what a lit tent looks like from outside. Without it the
-            blue tent was the one casualty of taking the warm directional out:
-            blue pigment under an orange lamp absorbs nearly all of it, and the
-            middle of the camp came out a flat grey while the red and yellow
-            tents kept their hue. Blending the lamp toward the tent's own colour
-            is the cheap stand-in for transmission, and it costs nothing.
-          */
+          position={[0, 1.22, 0.18]}
           color={lampColor}
-          intensity={7.5}
-          distance={6.4}
+          intensity={1.35}
+          distance={2.6}
           decay={2}
         />
 
       <TentInterior
         index={index}
         lit={active}
-        dressed={roomLit}
         gain={inside}
         readLight={readLight}
+        lanternLight={lantern}
+        lanternSpill={lanternSpill}
       />
 
-      {/* Lantern on the floor beside the bench. The candles carry the reading
-          light now, so this is fill rather than the key.
-
-          Mounted for whichever tent is `active` — exactly one, always — rather
-          than only once a tent has been entered, so the scene's light count
-          never moves. Its intensity is driven from `inside`, which is zero
-          until the camera is actually in the room. */}
-      <Prop parts={kit.parts('Lamp')} position={[-1.15, 0, 0.78]} scale={0.85} cast={false} />
-      {active && (
-        <pointLight
-          ref={lantern}
-          position={[-1.15, 0.36, 0.78]}
-          color="#ffc178"
-          intensity={0}
-          distance={3.6}
-          decay={2}
-        />
-      )}
+      {/* One authored baked mask grounds the bench and floor seat separately.
+          It never invalidates a shadow map when the flame flickers. */}
+      <ContactShadow
+        position={[0, 0.033, BENCH.z + 0.18]}
+        size={[3.35, 2.42]}
+        opacity={0.3}
+        renderOrder={-2}
+        alphaMap={tentInteriorShadow}
+      />
 
       {/*
         The journal, mounted in all three tents from the first frame, built
@@ -1967,20 +2954,6 @@ function Tent({
         cost up front, on the loading screen, is the trade being made instead.
       */}
       <group visible={here}>
-        <mesh
-          position={[BOOK_LOCAL.x, BENCH.top + 0.004, BOOK_LOCAL.z]}
-          rotation-x={-Math.PI / 2}
-          renderOrder={1}
-        >
-          <planeGeometry args={[0.56, 0.46]} />
-          <meshBasicMaterial
-            alphaMap={slabShadow ?? undefined}
-            color="#140b06"
-            transparent
-            opacity={0.3}
-            depthWrite={false}
-          />
-        </mesh>
         <Book
           index={index}
           width={BOOK_WIDTH}
@@ -1990,11 +2963,14 @@ function Tent({
           // unrevealed for as long as it is only in the scene to have its
           // shaders built and textures decoded.
           enabled={roomActive}
-          accent={TENT_NEON[index]}
+          accent={BOOK_ACCENT[index]}
           live={entering}
           onNavigate={onNavigate}
           onZoom={onZoom}
           onOpenRequest={onBookOpenRequest}
+          closedHot={bookHovered}
+          onClosedHover={onBookHover}
+          registerOutlineTarget={registerBookOutlineTarget}
           onClose={onClose}
         />
       </group>
@@ -2003,20 +2979,6 @@ function Tent({
       <Torch position={[-HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3} lit={here} />
       <Torch position={[HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3 + 1.7} lit={here} />
 
-      {/* What plants the tent on the grass. The moon's shadow map covers the
-          whole camp at three centimetres a texel, which at the foot of a wall
-          is not enough to draw the dark line where canvas meets ground. */}
-      <ContactShadow position={[0, 0.02, 0]} size={[3.7, 3.4]} opacity={0.26} />
-      <ContactShadow
-        position={[-HALF_W * 0.72, 0.02, BACK + 0.35]}
-        size={[1.1, 1.1]}
-        opacity={0.3}
-      />
-      <ContactShadow
-        position={[HALF_W * 0.72, 0.02, BACK + 0.35]}
-        size={[1.1, 1.1]}
-        opacity={0.3}
-      />
     </group>
   )
 }
@@ -2043,17 +3005,19 @@ function TentSign({
     <Html
       center
       distanceFactor={13}
-      // VISUAL-13.10b (2026-08-30): TOP + 1.15 -> TOP + 0.42. A metre and a
-      // half of empty sky between a label and the thing it labels is enough
-      // that the eye stops associating them; the reference frame has them
-      // sitting just off the peak.
-      position={[sign.x, TOP + 0.42, sign.z]}
+      // Removing the tall bead column already lowers the centred label/arrow
+      // block on screen. Keep only a small additional drop while leaving clear
+      // air between the chevron and the crossed poles.
+      position={[sign.x, TOP + 0.77, sign.z]}
       style={{ pointerEvents: 'auto', userSelect: 'none' }}
       zIndexRange={[8, 0]}
     >
       <div
         className={`tentsign${hovered === index ? ' is-hot' : ''}`}
-        style={{ ['--tent-color' as string]: TENT_NEON[index] }}
+        style={{
+          ['--tent-color' as string]: TENT_TINT[index],
+          ['--tent-glow' as string]: TENT_GLOW[index],
+        }}
         onPointerEnter={() => onHover(index as TentIndex, 'label')}
         onPointerLeave={() => onHover(null, 'label')}
         onClick={() => onEnter(index as TentIndex)}
@@ -2076,11 +3040,6 @@ function TentSign({
             <path className="tentsign__chev" d="M40 7 H47 L66 31 L85 7 H92" />
           </g>
         </svg>
-        <span className="tentsign__trail" aria-hidden="true">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <i key={i} style={{ animationDelay: `${i * 0.15}s` }} />
-          ))}
-        </span>
       </div>
     </Html>
   )
@@ -2093,6 +3052,8 @@ interface RigState {
   /** Which tent the camera is physically at — survives `entered` going null. */
   active: number
   travel: number
+  /** Reading-lens amount held during exit; zero when the book was never opened. */
+  exitBookZoom: number
 }
 
 /**
@@ -2106,16 +3067,22 @@ interface RigState {
  */
 function CameraRig({
   state,
+  bookOpen,
   focusRef,
   onFocus,
 }: {
   state: React.RefObject<RigState>
+  bookOpen: React.RefObject<number>
   focusRef: React.RefObject<number>
   onFocus: (i: TentIndex) => void
 }) {
   const { camera, pointer, size } = useThree()
   const pos = useMemo(() => new THREE.Vector3(), [])
   const look = useMemo(() => new THREE.Vector3(), [])
+  /** Scratch for the reading pose's in-frame slide. See READ_FRAME_SHIFT. */
+  const frameUp = useMemo(() => new THREE.Vector3(), [])
+  /** Scratch for the doorway segment; avoids allocating a vector every frame. */
+  const passage = useMemo(() => new THREE.Vector3(), [])
   const smoothLook = useMemo(() => new THREE.Vector3(CAMP_X, EYE, -4), [])
   const smoothPointer = useMemo(() => new THREE.Vector2(), [])
   const reported = useRef<TentIndex>(1)
@@ -2173,20 +3140,24 @@ function CameraRig({
     if (t < 0.42) {
       const k = clamp01(t / 0.42)
       pos.set(
-        THREE.MathUtils.lerp(CAMP_X + lobbyX + smoothPointer.x * 0.8, frame.approach.x, k),
+        THREE.MathUtils.lerp(
+          CAMP_X + lobbyX + TREE_AUDIT_PAN + smoothPointer.x * 0.8,
+          frame.approach.x,
+          k
+        ),
         // Ends the approach well below the lintel. Arriving at the doorway at
         // eye height and *then* crouching meant the descent had to happen
         // inside the last metre, which the damped follow could not keep up
         // with — see the duck below.
-        THREE.MathUtils.lerp(EYE + 0.45 - smoothPointer.y * 0.35, 0.9, k),
+        THREE.MathUtils.lerp(EYE + 1.08 - smoothPointer.y * 0.35, 0.9, k),
         THREE.MathUtils.lerp(lobbyZ, frame.approach.z, k)
       )
       look.set(
-        THREE.MathUtils.lerp(CAMP_X + lobbyX * 0.55, frame.origin.x, k),
+        THREE.MathUtils.lerp(CAMP_X + lobbyX * 0.55 + TREE_AUDIT_PAN, frame.origin.x, k),
         // And already aimed low. Looking at the middle of the tent puts the
         // canvas above the door across the top of the frame for the whole
         // approach, which is the first half of "it hits the door frame".
-        THREE.MathUtils.lerp(EYE - 0.35, 0.62, k),
+        THREE.MathUtils.lerp(EYE - 0.76, 0.62, k),
         THREE.MathUtils.lerp(tent.z + 1.5, frame.origin.z, k)
       )
       fov = THREE.MathUtils.lerp(42, 44, k)
@@ -2214,7 +3185,7 @@ function CameraRig({
       const k = clamp01((t - 0.42) / 0.3)
       const depthNow = THREE.MathUtils.lerp(BACK + 2.1, BACK - 0.9, k)
       const sd = depthNow - BACK
-      const here = frame.approach.clone().lerp(frame.inside, k)
+      const here = passage.copy(frame.approach).lerp(frame.inside, k)
       const y =
         sd > 1.2
           ? THREE.MathUtils.lerp(0.9, DUCK_Y, clamp01((2.1 - sd) / 0.9))
@@ -2252,7 +3223,19 @@ function CameraRig({
       // frame without touching the pitch.
       pos.y += READ_FRAME_LIFT * e
       look.y += READ_FRAME_LIFT * e
-      fov = THREE.MathUtils.lerp(39, 42, e)
+      // Then the pure in-frame slide. See READ_FRAME_SHIFT.
+      frameUp.subVectors(look, pos).normalize()
+      frameUp.set(-frameUp.x * frameUp.y, 1 - frameUp.y * frameUp.y, -frameUp.z * frameUp.y)
+      if (frameUp.lengthSq() > 1e-6) {
+        frameUp.normalize().multiplyScalar(READ_FRAME_SHIFT * e)
+        pos.add(frameUp)
+        look.add(frameUp)
+      }
+      // Once the cover opens, return to the original close reading lens. An
+      // exit preserves that lens only if the cover was opened; a closed-book
+      // exit retains the wide bench composition and immediately pulls away.
+      const bookZoom = st.entered === null ? st.exitBookZoom : bookOpen.current
+      fov = THREE.MathUtils.lerp(39, readFov(aspect, bookZoom), e)
     }
 
     if (st.travel > 0.02 && st.travel < 0.99) {
@@ -2292,6 +3275,8 @@ function CameraRig({
         pos: camera.position.toArray(),
         look: smoothLook.toArray(),
         fov: cam.fov,
+        travel: st.travel,
+        bookOpen: bookOpen.current,
       }
     }
   })
@@ -2315,6 +3300,42 @@ function SplitTone({ effectRef }: { effectRef?: React.RefObject<SplitToneEffect 
   return <primitive object={effect} dispose={null} />
 }
 
+type OutlineInternals = OutlineEffect & {
+  maskPass: { overrideMaterial: THREE.ShaderMaterial }
+  setFragmentShader: (shader: string) => void
+  setChanged: () => void
+}
+
+type ActiveOutline = { kind: 'tent' | 'book'; index: TentIndex }
+
+/**
+ * Compatibility correction for postprocessing 6.39 with the current renderer.
+ * The stock mask clear lands black here, even though the pass requests white,
+ * leaving its red silhouette channel empty and the edge buffer blank. Write
+ * the selected tent into red explicitly, then retain only samples outside
+ * that mask. This preserves both boundaries shown in the reference — the
+ * outer mesh silhouette and the doorway opening — without tracing surface
+ * seams or putting the luminous band over the canvas.
+ */
+function configureExteriorOutline(effect: OutlineEffect) {
+  const outline = effect as OutlineInternals
+  const maskMaterial = outline.maskPass.overrideMaterial
+  const originalMask = 'gl_FragColor.rg=vec2(0.0,depthTest);'
+  const correctedMask = 'gl_FragColor.rg=vec2(1.0,depthTest);'
+  if (maskMaterial.fragmentShader.includes(originalMask)) {
+    maskMaterial.fragmentShader = maskMaterial.fragmentShader.replace(originalMask, correctedMask)
+    maskMaterial.needsUpdate = true
+  }
+
+  const originalGate = 'edge*=(edgeStrength*mask.x*pulse);'
+  const exteriorGate = 'edge*=(edgeStrength*(1.0-mask.x)*pulse);'
+  const shader = outline.getFragmentShader()
+  if (shader.includes(originalGate)) {
+    outline.setFragmentShader(shader.replace(originalGate, exteriorGate))
+    outline.setChanged()
+  }
+}
+
 /* ------------------------------------------------------------------- scene */
 
 function Scene({
@@ -2324,7 +3345,8 @@ function Scene({
   onNavigate,
   onZoom,
   onBookOpenRequest,
-  onExit,
+  onBookClose,
+  prewarmIndex,
 }: {
   onFocus: (i: TentIndex) => void
   entered: number | null
@@ -2332,7 +3354,10 @@ function Scene({
   onNavigate: (to: string, from?: PageScreenRect) => void
   onZoom?: (src: string, from: PageScreenRect) => void
   onBookOpenRequest?: () => void
-  onExit?: () => void
+  /** Fired when an edge-page gesture closes the journal in place. */
+  onBookClose?: () => void
+  /** Interior state rendered only while the loading curtain is still opaque. */
+  prewarmIndex: TentIndex | null
 }) {
   const kit = useKit()
   const focusRef = useRef(1)
@@ -2341,7 +3366,12 @@ function Scene({
   // Reset alongside `hovered` whenever `entered` changes, so walking into the
   // next tent asks to be opened again instead of inheriting the last click.
   const wantOpen = useRef(false)
-  const rig = useRef<RigState>({ entered, active: entered ?? 1, travel: entered === null ? 0 : 1 })
+  const rig = useRef<RigState>({
+    entered,
+    active: entered ?? 1,
+    travel: entered === null ? 0 : 1,
+    exitBookZoom: 0,
+  })
   // Mirrors rig.active into React so the journal keeps rendering for the tent
   // the camera is still standing in after `entered` has gone null.
   const [active, setActive] = useState(entered ?? 1)
@@ -2361,8 +3391,35 @@ function Scene({
    */
   const [deep, setDeep] = useState(entered !== null)
   const deepRef = useRef(entered !== null)
+  const renderedActive = prewarmIndex ?? active
+  const renderedRoomLit = prewarmIndex !== null || roomLit
+  const renderedDeep = prewarmIndex !== null || deep
+  const [exteriorHoverReady, setExteriorHoverReady] = useState(entered === null)
+  const exteriorHoverReadyRef = useRef(entered === null)
+  const exteriorHoverResumeAt = useRef(0)
   const [hovered, setHovered] = useState<number | null>(null)
+  const [bookHovered, setBookHovered] = useState<number | null>(null)
+  const [bookCueReady, setBookCueReady] = useState(false)
+  const bookCueReadyRef = useRef(false)
+  const [bookCueDismissed, setBookCueDismissed] = useState(false)
   const hoverSource = useRef<{ tent: number | null; label: number | null }>({ tent: null, label: null })
+  const pointerInsideCanvas = useRef(false)
+
+  // Every tent visit gets the same affordance. The clock starts with the tent
+  // click, reaches the journal once the camera has crossed the doorway, and is
+  // reset rather than remembered when the reader returns to the fire.
+  useEffect(() => {
+    bookCueReadyRef.current = false
+    setBookCueReady(false)
+    setBookCueDismissed(false)
+    setBookHovered(null)
+    if (entered === null) return
+    const id = window.setTimeout(() => {
+      bookCueReadyRef.current = true
+      setBookCueReady(true)
+    }, BOOK_INTERACTION_DELAY_MS)
+    return () => window.clearTimeout(id)
+  }, [entered])
 
   /**
    * The moon's shadow frustum, re-aimed at whichever tent is being read in.
@@ -2375,6 +3432,7 @@ function Scene({
    * over the only thing that is on screen, and the staircase goes away.
    */
   const keyLight = useRef<THREE.DirectionalLight>(null)
+  const shadowDirty = useRef(false)
   const lastShadow = useRef(-1)
   const lastLightCheck = useRef(-1)
   const { gl } = useThree()
@@ -2387,7 +3445,66 @@ function Scene({
   const hemiLight = useRef<THREE.HemisphereLight>(null)
   const ambientLightRef = useRef<THREE.AmbientLight>(null)
   const fireKeyLight = useRef<THREE.PointLight>(null)
+  const [tentOutlineTargets, setTentOutlineTargets] = useState<THREE.Object3D[][]>(() => [[], [], []])
+  const registerOutlineTarget = useCallback((index: TentIndex, node: THREE.Object3D | null) => {
+    const meshes: THREE.Object3D[] = []
+    node?.traverse((object) => {
+      if ((object as THREE.Mesh).isMesh) meshes.push(object)
+    })
+    setTentOutlineTargets((previous) => {
+      const current = previous[index]
+      if (current.length === meshes.length && current.every((object, i) => object === meshes[i])) {
+        return previous
+      }
+      const next = previous.slice()
+      next[index] = meshes
+      return next
+    })
+  }, [])
+  const [bookOutlineTargets, setBookOutlineTargets] = useState<THREE.Object3D[][]>(() => [[], [], []])
+  const registerBookOutlineTarget = useCallback((index: number, node: THREE.Object3D | null) => {
+    const targets = node ? [node] : []
+    setBookOutlineTargets((previous) => {
+      const current = previous[index]
+      if (current.length === targets.length && current.every((object, i) => object === targets[i])) {
+        return previous
+      }
+      const next = previous.slice()
+      next[index] = targets
+      return next
+    })
+  }, [])
+  const flatTentOutlineTargets = useMemo(() => tentOutlineTargets.flat(), [tentOutlineTargets])
+  const flatBookOutlineTargets = useMemo(() => bookOutlineTargets.flat(), [bookOutlineTargets])
+  const hoverIntersections = useRef<THREE.Intersection[]>([])
+  const readTentUnderPointer = useCallback(
+    (state: RootState) => {
+      state.raycaster.setFromCamera(state.pointer, state.camera)
+      hoverIntersections.current.length = 0
+      state.raycaster.intersectObjects(flatTentOutlineTargets, false, hoverIntersections.current)
+      const hit = hoverIntersections.current[0]
+      return hit ? tentOutlineTargets.findIndex((targets) => targets.includes(hit.object)) : -1
+    },
+    [flatTentOutlineTargets, tentOutlineTargets]
+  )
+  const adoptTentUnderPointer = useCallback((hitIndex: number) => {
+    const next = hitIndex >= 0 ? (hitIndex as TentIndex) : null
+    hoverSource.current.tent = next
+    setHovered((previous) => {
+      if (next !== null && previous !== next) sfxHover()
+      return previous === next ? previous : next
+    })
+  }, [])
   const bloomRef = useRef(null)
+  const outlineEffectRef = useRef<OutlineEffect | null>(null)
+  const outlineStrength = useRef(0)
+  const setOutlineEffect = useCallback((effect: OutlineEffect | null) => {
+    outlineEffectRef.current = effect
+    if (effect) {
+      configureExteriorOutline(effect)
+      effect.edgeStrength = outlineStrength.current
+    }
+  }, [])
   const contrastRef = useRef(null)
   const vignetteRef = useRef(null)
   const splitToneRef = useRef<SplitToneEffect | null>(null)
@@ -2412,7 +3529,13 @@ function Scene({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Shadow maps are re-rendered on a timer, not per frame — see SHADOW_HZ.
+  const markShadowDirty = useCallback(() => {
+    shadowDirty.current = true
+  }, [])
+
+  // Shadow maps update on demand, not per frame. The initial map and every
+  // frustum/prewarm state still render immediately; moving tent casters are
+  // coalesced below and capped at SHADOW_HZ.
   useEffect(() => {
     gl.shadowMap.autoUpdate = false
     gl.shadowMap.needsUpdate = true
@@ -2424,34 +3547,9 @@ function Scene({
   useEffect(() => {
     const l = keyLight.current
     if (!l) return
-    const cam = l.shadow.camera
-    if (roomLit) {
-      const t = TENTS[active]
-      const S = 3.4
-      cam.left = -S
-      cam.right = S
-      cam.top = S
-      cam.bottom = -S
-      l.position.set(
-        t.x + MOON_LIGHT.x * 26,
-        MOON_LIGHT.y * 26,
-        t.z + MOON_LIGHT.z * 26
-      )
-      l.target.position.set(t.x, 0.7, t.z)
-    } else {
-      cam.left = -24
-      cam.right = 24
-      cam.top = 22
-      cam.bottom = -14
-      l.position.set(MOON_LIGHT.x * 42, MOON_LIGHT.y * 42, MOON_LIGHT.z * 42)
-      l.target.position.set(CAMP_X, 0, -3)
-    }
-    // The target is not in the scene graph, so its world matrix has to be
-    // brought up to date by hand before the shadow camera reads it.
-    l.target.updateMatrixWorld()
-    cam.updateProjectionMatrix()
+    aimMoonShadow(l, renderedRoomLit ? renderedActive : null)
     gl.shadowMap.needsUpdate = true
-  }, [roomLit, active, gl])
+  }, [renderedRoomLit, renderedActive, gl])
 
   /**
    * Tells the grass shader where the camp's flames actually are.
@@ -2482,6 +3580,29 @@ function Scene({
   const fireRocks = kit.parts('FireRocks')
 
   useEffect(() => {
+    // Preserve the close reading lens only when a book was actually opened.
+    // Leaving a closed journal must begin from the wide bench view instead of
+    // zooming toward the cover for the first frames of the walk out.
+    if (entered === null && rig.current.entered !== null) {
+      rig.current.exitBookZoom = wantOpen.current || bookOpen.current > 0.03 ? 1 : 0
+      const exitAt = performance.now()
+      exteriorHoverResumeAt.current = exitAt + EXIT_HOVER_GUARD_MS
+      if (import.meta.env.DEV) {
+        const w = window as unknown as {
+          __campHoverExitAt?: number
+          __campHoverResumeAt?: number
+        }
+        w.__campHoverExitAt = exitAt
+        w.__campHoverResumeAt = exteriorHoverResumeAt.current
+      }
+      exteriorHoverReadyRef.current = false
+      setExteriorHoverReady(false)
+    } else if (entered !== null) {
+      rig.current.exitBookZoom = 0
+      exteriorHoverResumeAt.current = Number.POSITIVE_INFINITY
+      exteriorHoverReadyRef.current = false
+      setExteriorHoverReady(false)
+    }
     rig.current.entered = entered
     // Only adopt a new active tent on the way in; on the way out the camera has
     // to finish leaving the one it is standing in.
@@ -2497,10 +3618,15 @@ function Scene({
     hoverSource.current.tent = null
     hoverSource.current.label = null
     setHovered(null)
+    setBookHovered(null)
     wantOpen.current = false
   }, [entered])
 
   const handleHover = (i: TentIndex | null, source: 'tent' | 'label') => {
+    // Meshes remain under the pointer as the camera travels. Ignore their
+    // synthetic over events until the same guard that controls scale/outline
+    // has elapsed, or a stale hover can re-arm without any pointer movement.
+    if (i !== null && (rig.current.entered !== null || !exteriorHoverReadyRef.current)) return
     hoverSource.current[source] = i
     const next = hoverSource.current.tent ?? hoverSource.current.label ?? null
     setHovered((prev) => {
@@ -2509,29 +3635,93 @@ function Scene({
     })
   }
 
+  const handleBookHover = useCallback((index: number, hot: boolean) => {
+    if (
+      hot &&
+      (!bookCueReadyRef.current || rig.current.entered !== index || bookOpen.current >= 0.05)
+    ) {
+      return
+    }
+    setBookHovered((current) => (hot ? index : current === index ? null : current))
+  }, [])
+
+  const clearAllHover = useCallback(() => {
+    hoverSource.current.tent = null
+    hoverSource.current.label = null
+    setHovered(null)
+    setBookHovered(null)
+    document.body.classList.remove('camp-hover')
+  }, [])
+
+  // Pointer-out is not guaranteed when the tab loses focus or the cursor exits
+  // the canvas during a scale animation. A single boundary reset owns both
+  // interaction types, so neither a tent nor a book can stay enlarged/outlined.
   useEffect(() => {
-    document.body.classList.toggle('camp-hover', hovered !== null && entered === null)
+    const canvas = gl.domElement
+    const markPointerInside = () => {
+      pointerInsideCanvas.current = true
+    }
+    const markPointerOutside = () => {
+      pointerInsideCanvas.current = false
+      clearAllHover()
+    }
+    canvas.addEventListener('pointerenter', markPointerInside)
+    canvas.addEventListener('pointerleave', markPointerOutside)
+    window.addEventListener('blur', clearAllHover)
+    return () => {
+      canvas.removeEventListener('pointerenter', markPointerInside)
+      canvas.removeEventListener('pointerleave', markPointerOutside)
+      window.removeEventListener('blur', clearAllHover)
+    }
+  }, [clearAllHover, gl])
+
+  useEffect(() => {
+    document.body.classList.toggle(
+      'camp-hover',
+      hovered !== null && entered === null && exteriorHoverReady
+    )
     return () => document.body.classList.remove('camp-hover')
-  }, [hovered, entered])
+  }, [hovered, entered, exteriorHoverReady])
 
   useFrame((state, delta) => {
     const st = rig.current
     const goingIn = st.entered !== null
 
-    // Arriving and reading are two moves, not one.
-    //
-    // On the way in the cover only starts lifting once the camera has actually
-    // stopped, so the opening is something you watch rather than something
-    // that has already happened by the time you get there. On the way out the
-    // travel value is pinned until the journal has shut, so the closing plays
-    // in front of the lens instead of behind a camera already backing away.
-    // 0.03, not 0.015: the book reads as shut well before the damped close
-    // actually crosses either threshold, so the gap between them is pure
-    // stare-at-a-closed-book time. Doubling it here roughly halves that wait
-    // without the release firing while the cover is visibly still falling.
-    const holdForBook = !goingIn && bookOpen.current > 0.03
-    const travelTarget = goingIn ? 1 : holdForBook ? st.travel : 0
-    st.travel += (travelTarget - st.travel) * damp(1.33, delta)
+    // During the moving exit, test only the registered tent meshes. The former
+    // `events.update()` raycast traversed every interactive mesh in the scene on
+    // every animation frame (including all three journals) even though only a
+    // tent can become interactive here. The narrow ray keeps the exact
+    // stationary-pointer hover behaviour without that transition-only CPU tax.
+    if (
+      !goingIn &&
+      exteriorHoverReadyRef.current &&
+      pointerInsideCanvas.current &&
+      st.travel > 0.004
+    ) {
+      adoptTentUnderPointer(readTentUnderPointer(state))
+    }
+
+    const hoverReady =
+      exteriorHoverReadyRef.current ||
+      (!goingIn && performance.now() >= exteriorHoverResumeAt.current)
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __campHoverReady?: boolean }).__campHoverReady = hoverReady
+    }
+    if (hoverReady !== exteriorHoverReadyRef.current) {
+      exteriorHoverReadyRef.current = hoverReady
+      setExteriorHoverReady(hoverReady)
+      if (hoverReady && pointerInsideCanvas.current) {
+        // No mouse move is required after an exit. Adopt the exact registered
+        // tent hit directly instead of asking R3F to raycast the entire scene.
+        adoptTentUnderPointer(readTentUnderPointer(state))
+      }
+    }
+
+    // Arriving and opening are two moves, but exiting starts immediately. The
+    // journal closes during the pull out instead of holding the camera over a
+    // widening bench shot before the doorway transition can begin.
+    const travelTarget = goingIn ? 1 : 0
+    st.travel += (travelTarget - st.travel) * damp(TENT_TRAVEL_DAMPING, delta)
     // ?travel=0.55 pins the walk-in part-way through. The headless screenshot
     // pass runs at a few frames a second, so a damped animation cannot be
     // caught by waiting on a stopwatch.
@@ -2542,7 +3732,8 @@ function Scene({
     // already-open book instead of a closed one sitting on a bench waiting to
     // be picked up. `wantOpen` is armed by clicking the cover itself; see
     // Book's onOpenRequest.
-    const openTarget = goingIn && st.travel > 0.965 && wantOpen.current ? 1 : 0
+    const openTarget =
+      goingIn && st.travel > BOOK_OPEN_TRAVEL_THRESHOLD && wantOpen.current ? 1 : 0
     bookOpen.current +=
       (openTarget - bookOpen.current) * damp(openTarget ? 1.83 : 2.57, delta)
     if (FROZEN_BOOK !== null) bookOpen.current = FROZEN_BOOK
@@ -2563,12 +3754,13 @@ function Scene({
 
     const t = state.clock.elapsedTime
     const flicker = fireFlicker(t)
-    tickWind(t, flicker, FIRE_VEC)
+    tickWind(t, flicker)
     tickAudio(t, flicker)
 
-    // Re-render the shadow map a few times a second instead of every frame.
-    // See SHADOW_HZ and the note on the key light.
-    if (t - lastShadow.current > 1 / SHADOW_HZ) {
+    // Only moving shadow casters enqueue this work. Once focus rise and hover
+    // scale settle, the map stays cached instead of refreshing forever at 6 Hz.
+    if (shadowDirty.current && t - lastShadow.current > 1 / SHADOW_HZ) {
+      shadowDirty.current = false
       lastShadow.current = t
       gl.shadowMap.needsUpdate = true
     }
@@ -2599,6 +3791,130 @@ function Scene({
     }
   })
 
+  // Tent outline and scale resume from this same one-second gate. A single
+  // source of truth prevents the former scale-first / outline-later response.
+  const tentOutlineActiveIndex =
+    FROZEN_HOT === null
+      ? entered === null && exteriorHoverReady
+        ? hovered
+        : null
+      : FROZEN_HOT
+  // Each visit gets the closed-journal cue after the shared 1.3-second
+  // interaction delay. Hover and scale share `bookHovered`, while the idle cue
+  // continues to breathe until the journal is opened.
+  const bookOutlineActiveIndex =
+    prewarmIndex !== null
+      ? prewarmIndex
+      : FROZEN_HOT === null && entered !== null && bookCueReady && !bookCueDismissed
+        ? entered
+        : null
+  const desiredOutline: ActiveOutline | null =
+    bookOutlineActiveIndex !== null
+      ? { kind: 'book', index: bookOutlineActiveIndex as TentIndex }
+      : tentOutlineActiveIndex !== null
+        ? { kind: 'tent', index: tentOutlineActiveIndex as TentIndex }
+        : null
+  const [renderedOutline, setRenderedOutline] = useState<ActiveOutline | null>(null)
+  const renderedOutlineRef = useRef<ActiveOutline | null>(null)
+  const wasOutlinePrewarming = useRef(false)
+
+  useEffect(() => {
+    if (prewarmIndex !== null) {
+      wasOutlinePrewarming.current = true
+      return
+    }
+    if (!wasOutlinePrewarming.current) return
+    wasOutlinePrewarming.current = false
+    // The exact book-outline state has now been rendered behind the curtain.
+    // Clear it immediately rather than spending visible lobby frames fading a
+    // hidden QA state out after the loader is gone.
+    outlineStrength.current = 0
+    if (outlineEffectRef.current) outlineEffectRef.current.edgeStrength = 0
+    renderedOutlineRef.current = null
+    setRenderedOutline(null)
+  }, [prewarmIndex])
+
+  // Latch the last target while fading out. Removing the selection immediately
+  // makes the post effect disappear in one frame, so the selection is released
+  // only after its strength has eased down to zero.
+  useEffect(() => {
+    if (!desiredOutline) return
+    const current = renderedOutlineRef.current
+    if (current?.kind === desiredOutline.kind && current.index === desiredOutline.index) return
+    renderedOutlineRef.current = desiredOutline
+    setRenderedOutline(desiredOutline)
+  }, [desiredOutline?.index, desiredOutline?.kind])
+
+  const outlineIsBook = renderedOutline?.kind === 'book'
+  const outlineIndex = renderedOutline?.index ?? 1
+  // A journal inherits its tent's accent so the affordance remains visually
+  // consistent as the camera moves from the exterior to the interior.
+  const outlineColor = Number.parseInt(TENT_GLOW[outlineIndex].slice(1), 16)
+  useEffect(() => {
+    const effect = outlineEffectRef.current
+    if (!effect) return
+    // These are uniforms. Passing a changing color prop through the wrapper
+    // reconstructs the complete OutlineEffect, disposing and relinking three
+    // programs during the first hover in a differently coloured tent.
+    effect.visibleEdgeColor.setHex(outlineColor)
+    effect.hiddenEdgeColor.setHex(outlineColor)
+  }, [outlineColor])
+  const visibleOutlineSelection =
+    renderedOutline === null
+      ? []
+      : outlineIsBook
+        ? bookOutlineTargets[outlineIndex]
+        : tentOutlineTargets[outlineIndex]
+  const outlineSelection = visibleOutlineSelection
+
+  // Pulse timing belongs to the book cue, never to hover. Changing hover state
+  // therefore neither restarts nor alters the waveform.
+  useEffect(() => {
+    if (outlineEffectRef.current) outlineEffectRef.current.pulseSpeed = outlineIsBook ? 0.35 : 0
+  }, [outlineIsBook])
+
+  useFrame((_, delta) => {
+    const wanted = desiredOutline !== null
+    const target = wanted ? 11 : 0
+    const next = THREE.MathUtils.lerp(
+      outlineStrength.current,
+      target,
+      damp(wanted ? 7 : 6, delta)
+    )
+    outlineStrength.current = next < 0.025 ? 0 : next
+    if (outlineEffectRef.current) outlineEffectRef.current.edgeStrength = outlineStrength.current
+    if (import.meta.env.DEV) {
+      ;(window as unknown as {
+        __campOutline?: {
+          desired: ActiveOutline | null
+          rendered: ActiveOutline | null
+          strength: number
+          pulseSpeed: number
+        }
+      }).__campOutline = {
+        desired: desiredOutline,
+        rendered: renderedOutlineRef.current,
+        strength: outlineStrength.current,
+        pulseSpeed: outlineEffectRef.current?.pulseSpeed ?? 0,
+      }
+    }
+
+    if (!wanted && outlineStrength.current === 0 && renderedOutlineRef.current !== null) {
+      renderedOutlineRef.current = null
+      setRenderedOutline(null)
+    }
+  })
+
+  // The post-processing selection uses layer 10. Clear it explicitly from
+  // every target that is no longer selected; rapid over/out sequences used to
+  // leave a previous target on that layer, producing a thicker ghost outline.
+  useEffect(() => {
+    const selected = new Set(outlineSelection)
+    for (const target of [...flatTentOutlineTargets, ...flatBookOutlineTargets]) {
+      if (!selected.has(target)) target.layers.disable(10)
+    }
+  }, [flatBookOutlineTargets, flatTentOutlineTargets, outlineSelection])
+
   return (
     <>
       {/* Height fog, not distance fog — see campsite/fog.ts, which swaps the
@@ -2615,22 +3931,21 @@ function Scene({
           like an evening rather than a night, and the aurora cannot read as
           the brightest thing in frame if the ground is competing with it. */}
       <directionalLight
+        name={MOON_KEY_NAME}
         ref={keyLight}
         position={[MOON_LIGHT.x * 42, MOON_LIGHT.y * 42, MOON_LIGHT.z * 42]}
         intensity={NIGHT.moon.intensity}
         color={NIGHT.moon.color}
-        castShadow
+        castShadow={PROFILE_SHADOWS}
         // Tighter frustum at a smaller resolution than it used to have: the
         // same texels per metre across the part of the scene that is ever on
         // camera, for 45% of the shadow pass. The frustum is then re-aimed at
         // whichever tent the camera walks into — see the effect below.
         //
-        // The map itself is re-rendered a few times a second rather than every
-        // frame — see SHADOW_HZ. Nothing in this scene that casts a shadow
-        // moves: the tents bob a couple of centimetres, everything else is
-        // bolted down. Paying a full 1536² depth pass sixty times a second to
-        // track that is the definition of a fixed cost with nothing to show
-        // for it.
+        // The map itself is re-rendered at most a few times a second while a
+        // tent's focus rise or hover scale is actually moving — see SHADOW_HZ.
+        // Once those transforms settle, everything that casts a shadow is
+        // static and the cached map needs no periodic refresh.
         shadow-mapSize={[1536, 1536]}
         shadow-bias={-0.0009}
         shadow-normalBias={0.022}
@@ -2682,12 +3997,11 @@ function Scene({
       <ambientLight ref={ambientLightRef} intensity={NIGHT.ambient.intensity} color={NIGHT.ambient.color} />
 
       <Ground />
-      <Impostors center={[CAMP_X, 0]} />
       <Haze center={[CAMP_X, 0]} />
       <Scatter />
 
       <group position={FIRE_POS}>
-        <group scale={0.85}>
+        <group scale={1.05}>
           {fireRocks.map((p, i) => (
             <mesh key={`r${i}`} geometry={p.geometry} material={p.material} receiveShadow />
           ))}
@@ -2704,21 +4018,39 @@ function Scene({
           index={i}
           focus={focusRef}
           entered={entered}
-          active={active === i}
-          roomLit={roomLit}
+          active={renderedActive === i}
+          roomLit={renderedRoomLit}
           hovered={hovered}
           bookOpen={bookOpen}
-          deep={deep}
+          deep={renderedDeep}
+          exteriorHoverReady={exteriorHoverReady}
           rig={rig}
           onEnter={onEnter}
           onHover={handleHover}
           onNavigate={onNavigate}
           onZoom={onZoom}
           onBookOpenRequest={() => {
+            // Opening eligibility, hover allowance, and the idle glow all use
+            // the same readiness flag set by BOOK_INTERACTION_DELAY_MS.
+            if (!bookCueReadyRef.current) return
+            setBookCueDismissed(true)
+            setBookHovered(null)
             wantOpen.current = true
             onBookOpenRequest?.()
           }}
-          onClose={() => onExit?.()}
+          bookHovered={bookHovered === i}
+          onBookHover={handleBookHover}
+          registerBookOutlineTarget={registerBookOutlineTarget}
+          onClose={() => {
+            // Edge-page gestures put the journal down without leaving the
+            // tent. Escape and the door button remain the only scene exits.
+            wantOpen.current = false
+            setBookHovered(null)
+            setBookCueDismissed(false)
+            onBookClose?.()
+          }}
+          registerOutlineTarget={registerOutlineTarget}
+          onShadowTransformChange={markShadowDirty}
         />
       ))}
 
@@ -2728,7 +4060,9 @@ function Scene({
           <DoorwaySpill
             key={`spill${i}`}
             position={[p.x, 0.025, p.z]}
-            color={TENT_NEON_COLOR[i]}
+            color={TENT_INTERIOR_COLOR}
+            rotation={TENTS[i].yaw}
+            opacity={0.26}
           />
         )
       })}
@@ -2744,10 +4078,16 @@ function Scene({
         />
       ))}
 
-      <Fireflies center={[CAMP_X, -6]} count={110} />
-      <Leaves count={55} />
+      {PROFILE_FIREFLIES ? (
+        <Fireflies
+          center={[CAMP_X, -6]}
+          count={110}
+          exclusions={FIREFLY_TENT_EXCLUSIONS}
+        />
+      ) : null}
+      {PROFILE_LEAVES ? <Leaves count={55} /> : null}
 
-      <CameraRig state={rig} focusRef={focusRef} onFocus={onFocus} />
+      <CameraRig state={rig} bookOpen={bookOpen} focusRef={focusRef} onFocus={onFocus} />
 
       {/*
         No multisampling.
@@ -2763,6 +4103,18 @@ function Scene({
       */}
       {frozen('post') === 0 ? null : (
       <EffectComposer enableNormalPass={false} multisampling={frozen('msaa') ?? 0}>
+        <Outline
+          ref={setOutlineEffect}
+          selection={outlineSelection}
+          visibleEdgeColor={Number.parseInt(TENT_GLOW[1].slice(1), 16)}
+          hiddenEdgeColor={Number.parseInt(TENT_GLOW[1].slice(1), 16)}
+          edgeStrength={0}
+          blur
+          kernelSize={KernelSize.LARGE}
+          resolutionScale={1}
+          pulseSpeed={0}
+          xRay={false}
+        />
         {/*
           One bloom pass, not two.
 
@@ -2801,29 +4153,17 @@ function Scene({
             near-black regions. See LIGHTING_TUNING.md. */}
         <Bloom
           ref={bloomRef}
-          intensity={1.45}
-          luminanceThreshold={0.87}
-          luminanceSmoothing={0.11}
+          intensity={1.12}
+          luminanceThreshold={0.9}
+          luminanceSmoothing={0.08}
           mipmapBlur
-          radius={0.62}
+          radius={0.54}
           levels={BLOOM_LEVELS}
         />
-        {/*
-          No Outline pass.
-
-          It traced the hovered tent's screen-space edge and blurred it into a
-          halo, which is the best-looking version of "this one is selected" — and
-          it cost a depth pre-pass, a mask render and a two-stage blur *every
-          frame*, whether or not anything was hovered. That is a permanent price
-          for an effect that is on screen for a second at a time.
-
-          The Fresnel rim in glow.ts does the job instead. It could not carry it
-          alone before, because a tent is flat panels squarely facing the camera
-          and the only fragments with any rim to speak of are a few pixels of
-          silhouette — so the rim now drives well past the bloom threshold and
-          the bloom pass above throws the halo off it. Same tube of light, no
-          extra passes.
-        */}
+        {/* The outline selects the imported tent mask, whose coverage boundary
+            is the outer mesh plus its doorway opening. Surface seams are not
+            mask boundaries, so they remain clean. The outside-mask correction
+            keeps the luminous band off the canvas itself. */}
         {/* No chromatic aberration and no film grain any more.
             Both were doing the same damage: the dispersion softened every
             high-contrast silhouette — which in this scene is every tree
@@ -2866,7 +4206,7 @@ function Scene({
             The blacks are not lifted and the contrast is up: a night scene
             needs somewhere genuinely dark for the aurora and the fire to be
             bright *against*. */}
-        <HueSaturation hue={0} saturation={0.30} />
+        <HueSaturation hue={0} saturation={0.16} />
         {/* Blacks down, not up. The scene lighting does the work — see NIGHT —
             and this only finishes it: a night frame wants its shadow end sat on
             the floor so the fire and the curtains have somewhere to be bright
@@ -2880,7 +4220,7 @@ function Scene({
             the bloom tighten above, same reasoning (item b). See
             [[portfolio-post-chain-tonemapping]] before pushing this further —
             past ~0.115 it drove firelit grass's green channel through zero. */}
-        <BrightnessContrast ref={contrastRef} brightness={-0.02} contrast={0.105} />
+        <BrightnessContrast ref={contrastRef} brightness={0.008} contrast={0.03} />
         <SplitTone effectRef={splitToneRef} />
         {/* Light. The corners of the reference are dark because its *sky* is
             dark there, not because a lens is closing them down — and at 0.32 /
@@ -2888,46 +4228,11 @@ function Scene({
             which sits four tenths of the way to a corner. The scene lighting
             owns the falloff now; this only stops the frame's edges competing
             with the fire. */}
-        <Vignette ref={vignetteRef} offset={0.50} darkness={0.26} />
+        <Vignette ref={vignetteRef} offset={0.64} darkness={0.06} />
       </EffectComposer>
       )}
     </>
   )
-}
-
-/**
- * Pixels the renderer is allowed to draw, before the performance monitor gets
- * a say. Roughly a 1080p frame.
- */
-const PIXEL_BUDGET = 2_100_000
-/**
- * **Never below one CSS pixel per rendered pixel.**
- *
- * This used to be 0.62, and the floor is the whole story: `dpr={[1, dprCap]}`
- * reads as a range but R3F resolves it as
- * `min(max(dpr[0], devicePixelRatio), dpr[1])` — the *cap* is the last word, so
- * a `dprCap` under 1 renders under native however high the first element is.
- * On any window past about 2.1 megapixels `pixelBudgetDpr` returned exactly
- * that, and the scene opened upscaled from a smaller buffer: soft treeline,
- * mushy grass, unreadable journal type. The `PerformanceMonitor` below then
- * walked it back up in 0.15 steps, so it sharpened several seconds in — or
- * never, once `flipflops` pinned it.
- *
- * Below-native is not a lever this scene is allowed to pull. The monitor still
- * has room to move between 1 and `DPR_MAX` on a high-density display, which is
- * where the pixels that actually cost something are.
- */
-const DPR_MIN = 1
-const DPR_MAX = 1.6
-
-function pixelBudgetDpr() {
-  if (typeof window === 'undefined') return 1
-  const area = Math.max(1, window.innerWidth * window.innerHeight)
-  const device = window.devicePixelRatio || 1
-  // Never *above* the display's own ratio — supersampling nobody asked for —
-  // and never above the budget. The budget can pull a 2x display down to 1.2;
-  // it can no longer pull anything below native.
-  return THREE.MathUtils.clamp(Math.min(device, Math.sqrt(PIXEL_BUDGET / area)), DPR_MIN, DPR_MAX)
 }
 
 /**
@@ -2982,6 +4287,71 @@ function LoadTracker({ onProgress }: { onProgress?: (p: number) => void }) {
   return null
 }
 
+interface PausedClock {
+  elapsedTime: number
+  oldTime: number
+  startTime: number
+  stoppedAt: number
+}
+
+/**
+ * Stops the R3F loop when the fully prepared camp cannot be seen.
+ *
+ * This deliberately lives inside the Canvas instead of changing its
+ * `frameloop` prop with page visibility. R3F's `setFrameloop` stops/starts the
+ * THREE.Clock and resets elapsedTime; without repairing that state, returning
+ * to the camp restarts every clock-driven effect and can feed a large delta to
+ * an in-progress camera move. The old timestamp is rebased by the exact pause
+ * duration so the first resumed delta is the remainder of the previous frame,
+ * not all of the time spent offscreen.
+ */
+function ActivityFrameloop({ active }: { active: boolean }) {
+  const { clock, frameloop, invalidate, setFrameloop } = useThree()
+  const pausedClock = useRef<PausedClock | null>(null)
+
+  useLayoutEffect(() => {
+    const now = performance.now()
+
+    if (!active) {
+      // `never` is also the Canvas' intentional startup mode. Do not turn that
+      // fresh clock into a pause snapshot before Warmup begins rendering.
+      if (frameloop === 'never' && pausedClock.current === null) return
+
+      const snapshot =
+        pausedClock.current ?? {
+          elapsedTime: clock.elapsedTime,
+          oldTime: clock.oldTime,
+          startTime: clock.startTime,
+          stoppedAt: now,
+        }
+
+      if (frameloop !== 'never') setFrameloop('never')
+      // setFrameloop resets these fields. Put the last rendered instant back so
+      // repeated parent renders while hidden cannot erode the saved timeline.
+      clock.elapsedTime = snapshot.elapsedTime
+      clock.oldTime = snapshot.oldTime
+      clock.startTime = snapshot.startTime
+      pausedClock.current = snapshot
+      return
+    }
+
+    const snapshot = pausedClock.current
+    if (frameloop !== 'always') setFrameloop('always')
+    if (snapshot) {
+      const pausedFor = now - snapshot.stoppedAt
+      clock.elapsedTime = snapshot.elapsedTime
+      clock.oldTime = snapshot.oldTime + pausedFor
+      clock.startTime = snapshot.startTime + pausedFor
+      pausedClock.current = null
+    }
+    // setFrameloop changes the mode but does not itself guarantee that the
+    // shared R3F loop is scheduled after it had gone idle.
+    invalidate()
+  }, [active, clock, frameloop, invalidate, setFrameloop])
+
+  return null
+}
+
 /**
  * Compiles every shader and uploads every texture before the first frame.
  *
@@ -3005,15 +4375,70 @@ function LoadTracker({ onProgress }: { onProgress?: (p: number) => void }) {
  * `compileAsync` yields between programs where the browser supports it, so the
  * loading bar keeps moving instead of freezing solid for the duration.
  */
-function Warmup({ onReady }: { onReady?: () => void }) {
+function Warmup({
+  onReady,
+  onPrepared,
+  onPrewarm,
+}: {
+  onReady?: () => void
+  onPrepared: () => void
+  onPrewarm: (index: TentIndex | null) => void
+}) {
   const { gl, scene, camera } = useThree()
+  const [tentClothTexture, tentLeatherTexture] = useTexture([
+    TENT_CLOTH,
+    TENT_LEATHER_GRAIN,
+  ])
 
   useEffect(() => {
     let cancelled = false
-    const timers: number[] = []
 
-    const uploadTextures = () => {
+    const nextFrame = () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+    const waitForSubmittedGpuWork = async () => {
+      const context = gl.getContext()
+      if (
+        typeof WebGL2RenderingContext === 'undefined' ||
+        !(context instanceof WebGL2RenderingContext)
+      ) {
+        return
+      }
+
+      // The final prewarm renders can still be queued in the driver after the
+      // JavaScript frame has returned. Starting the loader fade at that point
+      // exposes the campsite while the GPU catches up, which looks like a
+      // frozen translucent "Ready" frame. A fence lets that work finish behind
+      // the fully opaque, compositor-animated curtain without blocking the
+      // browser thread (unlike gl.finish()).
+      const fence = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0)
+      if (!fence) return
+      context.flush()
+      const deadline = performance.now() + 2500
+      try {
+        while (!cancelled && performance.now() < deadline) {
+          const status = context.clientWaitSync(fence, 0, 0)
+          if (
+            status === context.ALREADY_SIGNALED ||
+            status === context.CONDITION_SATISFIED ||
+            status === context.WAIT_FAILED
+          ) {
+            break
+          }
+          await nextFrame()
+        }
+      } finally {
+        context.deleteSync(fence)
+      }
+    }
+
+    const uploadTextures = async () => {
       const seen = new Set<THREE.Texture>()
+      // These custom onBeforeCompile uniforms are not discoverable through a
+      // material's standard map slots. Stage them explicitly so their first
+      // GPU upload cannot cluster in the hidden interior-prewarm frame.
+      seen.add(tentClothTexture)
+      seen.add(tentLeatherTexture)
       const MAPS = [
         'map',
         'normalMap',
@@ -3033,103 +4458,142 @@ function Warmup({ onReady }: { onReady?: () => void }) {
             const tex = mat[key]
             if (tex && tex.isTexture && !seen.has(tex)) {
               seen.add(tex)
-              gl.initTexture(tex)
             }
           }
         }
       })
+
+      // A texture upload is synchronous at the WebGL boundary. Uploading the
+      // entire scene in one loop froze the loader even though the surrounding
+      // asset promises were asynchronous. One upload per animation frame
+      // keeps the title, embers and progress rail responsive throughout.
+      for (const texture of seen) {
+        if (cancelled) break
+        gl.initTexture(texture)
+        await nextFrame()
+      }
       return seen.size
     }
 
-    /*
-      Then draw the whole thing once, with everything shown.
-
-      `compile` is not enough on its own, and the gap is a specific one: it
-      prepares the *material* programs it finds by walking the scene, and it
-      knows nothing about the shadow map. A caster's depth program is a separate
-      shader, built by the shadow pass the first time that object is actually
-      rendered into the map — so an object sitting hidden in the scene has had
-      its lit shader compiled and its depth shader not. Measured on the tent
-      click, that was the whole of the remaining stall.
-
-      Two real frames with every hidden object temporarily shown, and a forced
-      shadow update, covers everything `compile` misses: depth programs, the
-      post chain's own passes, and any texture that only a draw call touches.
-      Two rather than one because the first pass is what populates the shadow
-      map that the second one reads.
-
-      It is drawn to the canvas under a loading screen that is still opaque, so
-      there is nothing to see.
-    */
-    const drawEverythingOnce = () => {
-      const hidden: THREE.Object3D[] = []
-      scene.traverse((o) => {
-        if (!o.visible) {
-          hidden.push(o)
-          o.visible = true
+    const compiler = gl as unknown as {
+      compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown>
+    }
+    const compileWithoutBlocking = async () => {
+      // `compileAsync` uses KHR_parallel_shader_compile and polls readiness
+      // between frames. Deliberately skip the synchronous `compile` fallback:
+      // on a browser without the extension, a longer loader is preferable to
+      // a loader whose animation freezes and looks crashed.
+      if (typeof compiler.compileAsync === 'function') {
+        const hidden: THREE.Object3D[] = []
+        scene.traverse((object) => {
+          if (!object.visible) {
+            hidden.push(object)
+            object.visible = true
+          }
+        })
+        try {
+          // R3F/three's compiler respects ancestor visibility. All three tent
+          // interiors and journals normally begin hidden, which left most of
+          // their programs for the first real render despite compileAsync.
+          // The render loop is stopped here, so this visibility change is
+          // compiler-only and can never appear on screen.
+          await compiler.compileAsync(scene, camera)
+        } finally {
+          for (const object of hidden) object.visible = false
         }
-      })
-      try {
-        gl.shadowMap.needsUpdate = true
-        gl.render(scene, camera)
-        gl.shadowMap.needsUpdate = true
-        gl.render(scene, camera)
-      } finally {
-        for (const o of hidden) o.visible = false
-        gl.shadowMap.needsUpdate = true
       }
     }
 
-    /*
-      The same sweep again, later, into a scratch buffer nobody sees.
-
-      One pass at load is not enough, and the reason is timing rather than
-      coverage: a material's program is keyed on the *set of maps it has*, and
-      several of this scene's materials do not have their full set yet when the
-      pass above runs. The journal's canvases are painted in a layout effect,
-      the bench's contact shadow is a texture that arrives on its own promise,
-      and a map assigned to a material that has already been compiled without
-      one invalidates its program. Measured on the click, seven programs were
-      still being linked in that frame — five standard, one basic, one depth —
-      and three.js checks `LINK_STATUS` before it can draw with any of them,
-      which is a hard wait on the driver. That was 1.88 seconds of an 8-second
-      profile, and all of it landed on the walk-in.
-
-      Rendering into a 4x4 target rather than the canvas is what makes this
-      safe to do late: every object is temporarily shown, so the interiors, the
-      journal and the shelf all get their lit *and* their depth programs built,
-      but the result goes to a buffer four pixels across that is thrown away.
-      Nothing reaches the screen, and the frame it costs is one frame of vertex
-      and draw-call work with essentially no fill.
-
-      Twice, spread out, because "later" is not one moment: 1.5s catches the
-      fonts and the layout effects, 5s catches anything on a slow connection.
-    */
-    const warmOffscreen = () => {
-      if (cancelled) return
-      const target = new THREE.WebGLRenderTarget(4, 4)
-      const previous = gl.getRenderTarget()
-      try {
-        gl.setRenderTarget(target)
-        uploadTextures()
-        drawEverythingOnce()
-      } finally {
-        gl.setRenderTarget(previous)
-        target.dispose()
-        gl.shadowMap.needsUpdate = true
+    const prepareProgramInterfaces = async () => {
+      const programs = [...(gl.info.programs ?? [])] as unknown as Array<{
+        cacheKey?: string
+        getUniforms?: () => unknown
+        isReady?: () => boolean
+      }>
+      const timings: Array<{ index: number; ms: number; key: string }> = []
+      for (let index = 0; index < programs.length; index += 1) {
+        const program = programs[index]
+        if (cancelled) return
+        // Some programs (notably postprocessing/depth passes) are already in
+        // renderer.info but aren't part of compileAsync's returned material
+        // set. Poll their KHR completion flag ourselves before touching the
+        // interface; querying ACTIVE_UNIFORMS early implicitly waits for link.
+        while (!cancelled && program.isReady && !program.isReady()) {
+          await nextFrame()
+        }
+        if (cancelled) return
+        // Three defers ACTIVE_UNIFORMS / ACTIVE_ATTRIBUTES discovery until a
+        // program's first draw. Doing all programs in that draw produced the
+        // measured multi-second loader freeze even after parallel compilation.
+        // Once linking reports ready, finalize one interface per loader frame.
+        const started = performance.now()
+        program.getUniforms?.()
+        timings.push({
+          index,
+          ms: performance.now() - started,
+          key: program.cacheKey?.slice(0, 180) ?? '',
+        })
+        await nextFrame()
+      }
+      if (PROFILE_INSPECT) {
+        ;(window as unknown as { __warmInterfaceTimings?: unknown }).__warmInterfaceTimings =
+          timings.sort((a, b) => b.ms - a.ms)
       }
     }
 
-    const done = () => {
+    const done = async () => {
       if (cancelled) return
-      const textures = uploadTextures()
+      // Trigger the journal's asynchronous work explicitly and keep the opaque
+      // loader up until it is finished. Previously two offscreen sweeps ran at
+      // 1.5s and 5s *after* reveal; if the reader clicked during either sweep,
+      // its shader-link and texture-upload work landed inside the camera move.
+      const fontsReady = loadBookFonts()
+      const printsReady = waitForBookImages()
       const before = gl.info.programs?.length ?? 0
-      const shown = drawEverythingOnce()
-      timers.push(window.setTimeout(warmOffscreen, 1500), window.setTimeout(warmOffscreen, 5000))
+      await compileWithoutBlocking()
+      const textures = await uploadTextures()
+      await Promise.allSettled([fontsReady, printsReady])
+      if (cancelled) return
+      // Book effects repaint their canvases in promise continuations. Yield,
+      // upload those final canvases in the same chunked fashion, then ask the
+      // parallel compiler for any program keys that changed with their maps.
+      await nextFrame()
+      await nextFrame()
+      await uploadTextures()
+      await compileWithoutBlocking()
+      await prepareProgramInterfaces()
+      if (cancelled) return
+      // The Canvas is held at `frameloop="never"` until this point, preventing
+      // R3F's first normal render from racing the parallel compiler and forcing
+      // a synchronous link. While the curtain is still opaque, render each
+      // tent's real interior state for a few frames. This prepares the depth
+      // variants and shadow/post passes that scene traversal alone cannot
+      // compile and that otherwise appear as a one-time hitch on first entry.
+      onPrepared()
+      for (const index of [0, 1, 2] as const) {
+        onPrewarm(index)
+        await nextFrame()
+        await nextFrame()
+        await nextFrame()
+        await nextFrame()
+        await nextFrame()
+      }
+      // Restore the exact lobby state and rebuild its shadow map before the
+      // loader fades. None of the temporary interior frames can reach screen.
+      onPrewarm(null)
+      await nextFrame()
+      await nextFrame()
+      await nextFrame()
+      await nextFrame()
+      await nextFrame()
+      await nextFrame()
+      await nextFrame()
+      await nextFrame()
+      await waitForSubmittedGpuWork()
+      if (cancelled) return
       if (import.meta.env.DEV) {
         ;(window as unknown as { __warm?: unknown }).__warm = {
           textures,
-          shown,
           programsBefore: before,
           programsAfter: gl.info.programs?.length ?? 0,
           calls: gl.info.render.calls,
@@ -3138,35 +4602,38 @@ function Warmup({ onReady }: { onReady?: () => void }) {
       onReady?.()
     }
 
-    const compiler = gl as unknown as {
-      compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<unknown>
-    }
-    if (typeof compiler.compileAsync === 'function') {
-      compiler.compileAsync(scene, camera).then(done, done)
-    } else {
-      gl.compile(scene, camera)
-      done()
-    }
+    void done()
     return () => {
       cancelled = true
-      for (const id of timers) window.clearTimeout(id)
     }
-  }, [gl, scene, camera, onReady])
+  }, [
+    gl,
+    scene,
+    camera,
+    onReady,
+    onPrepared,
+    onPrewarm,
+    tentClothTexture,
+    tentLeatherTexture,
+  ])
 
   return null
 }
 
 export default function CampHero({
+  active,
   onFocus,
   entered,
   onEnter,
   onNavigate,
   onZoom,
   onBookOpenRequest,
-  onExit,
+  onBookClose,
   onProgress,
   onReady,
 }: {
+  /** Whether the prepared WebGL scene is currently observable by the reader. */
+  active: boolean
   onFocus?: (i: TentIndex) => void
   entered: number | null
   onEnter: (i: TentIndex) => void
@@ -3174,15 +4641,24 @@ export default function CampHero({
   onZoom?: (src: string, from: PageScreenRect) => void
   /** Fired the moment the reader clicks the closed journal open. */
   onBookOpenRequest?: () => void
-  /** Fired when a journal is closed from its own last/first page rather than
-      by Escape or the door button — see Book's boundary `go`. */
-  onExit?: () => void
+  /** Fired when the open journal is put down without leaving the tent. */
+  onBookClose?: () => void
   /** 0-1 through the asset download. */
   onProgress?: (p: number) => void
   /** Fired once every shader is compiled and the scene is safe to reveal. */
   onReady?: () => void
 }) {
+  const [renderReady, setRenderReady] = useState(false)
+  const [warmupReady, setWarmupReady] = useState(false)
+  const [prewarmIndex, setPrewarmIndex] = useState<TentIndex | null>(null)
+  const beginRendering = useCallback(() => setRenderReady(true), [])
+  const setInteriorPrewarm = useCallback((index: TentIndex | null) => setPrewarmIndex(index), [])
+  const finishWarmup = useCallback(() => {
+    setWarmupReady(true)
+    onReady?.()
+  }, [onReady])
   const prevEntered = useRef(entered)
+
   useEffect(() => {
     if (prevEntered.current === entered) return
     if (entered !== null) sfxEnter()
@@ -3190,30 +4666,12 @@ export default function CampHero({
     prevEntered.current = entered
   }, [entered])
 
-  /**
-   * Render scale, chosen from a pixel budget rather than from a device ratio.
-   *
-   * This scene is fill-bound: nearly every fragment on screen runs a full PBR
-   * shader with a dozen lights, an alpha-cutout foliage pass on top of it, and
-   * then a post chain over the whole frame. What that costs is a function of
-   * *how many pixels there are*, and a device pixel ratio says nothing about
-   * that — 1.75 on a 1280x720 laptop panel is 2.8 megapixels, and the same
-   * 1.75 on a 4K desktop is 25. The old cap was the second case, which is how
-   * a scene that measures fine on a small window ends up at single-figure
-   * frame rates on a large one.
-   *
-   * So: pick the ratio that lands on a pixel count instead. The monitor below
-   * still adjusts from there, so a fast machine climbs and a slow one drops,
-   * but it starts from somewhere sane on every display size rather than from
-   * the top on all of them.
-   */
-  const [dprCap, setDprCap] = useState(pixelBudgetDpr)
-
   return (
     <>
     <LoadTracker onProgress={onProgress} />
     <Canvas
       className="hero__canvas"
+      frameloop={renderReady ? 'always' : 'never'}
       // PCF with a radius, not the default PCFSoft.
       //
       // PCFSoft's kernel is fixed — it ignores `shadow.radius` — so the one
@@ -3222,9 +4680,9 @@ export default function CampHero({
       // staircase however the map was sized or the frustum tightened. A
       // widened PCF kernel is both cheaper and, at this scale, far softer.
       shadows="percentage"
-      dpr={[1, dprCap]}
+      dpr={GRAPHICS_DPR}
       /*
-        Multisampled and alpha-backed, deliberately kept that way.
+        The visible scene target is not multisampled or alpha-backed.
 
         Neither of these should do anything: the `EffectComposer` below owns the
         render loop, the scene lands in its own half-float target, and the only
@@ -3235,16 +4693,15 @@ export default function CampHero({
         a saved buffer and a saved resolve blit for no visible cost, and the
         screenshot diff agrees to the bit on every pose the site can reach.
 
-        They stay on all the same. `?post=0` — the dev freeze that pulls the
-        composer out to look at the raw scene — *does* draw straight into this
-        buffer, and there the multisampling is the only antialiasing in the
-        pipeline. This is a scene whose whole subject is silhouettes: alpha-cut
-        foliage against a night sky. Holding the safety margin on the two flags
-        that decide how those edges resolve is worth more than the buffer.
+        Development keeps canvas MSAA because `?post=0` pulls the composer out
+        and draws the raw scene straight into this buffer. Production always
+        uses the composer, so it can skip canvas MSAA without touching the
+        scene's actual render target. The drawing buffer is opaque in both
+        builds because the sky covers every pixel.
 
         See OPTIMIZATION.md §3 for what it costs.
       */
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      gl={{ antialias: import.meta.env.DEV, alpha: false, powerPreference: 'high-performance' }}
       camera={{ position: [CAMP_X, EYE + 0.5, 14], fov: 42, near: 0.06, far: 400 }}
       onCreated={(state) => {
         state.gl.toneMapping = THREE.ACESFilmicToneMapping
@@ -3279,36 +4736,14 @@ export default function CampHero({
 
         // Dev handle for the screenshot harness: raycasting into the live scene
         // is the only way to find out what a stray blob in a render actually is.
-        if (import.meta.env.DEV) {
+        if (import.meta.env.DEV || PROFILE_INSPECT) {
           ;(window as unknown as { __camp?: unknown }).__camp = state
         }
       }}
     >
-      {/* `flipflops` stops the monitor oscillating: after three reversals it
-          settles on whatever it last had rather than hunting for ever, which
-          on a borderline machine is worse than either resolution.
-
-          It is mounted only where it can do something. R3F resolves
-          `dpr={[1, cap]}` as `min(max(1, devicePixelRatio), cap)`, so on an
-          ordinary 1x display the cap is inert — every incline is a React state
-          write, a re-render of the whole canvas tree and no change to a single
-          pixel. That churn is not free and it is not harmless: with the aurora
-          march gone the scene runs at 150fps, the monitor inclines on nearly
-          every sample, and the resulting update storm was tripping React's
-          "Maximum update depth exceeded" during load. */}
-      {typeof window !== 'undefined' && window.devicePixelRatio > DPR_MIN ? (
-      <PerformanceMonitor
-        /* Lower bar than 50-60. Holding out for 60 on a scene like this means a
-           machine that can comfortably do 45 keeps being told it is failing,
-           and the monitor walks the resolution down past the point where the
-           frame rate was ever the problem. */
-        bounds={() => [38, 55]}
-        flipflops={3}
-        onIncline={() => setDprCap((d) => Math.min(DPR_MAX, d + 0.15))}
-        onDecline={() => setDprCap((d) => Math.max(DPR_MIN, d - 0.15))}
-        onFallback={() => setDprCap(DPR_MIN)}
-      />
-      ) : null}
+      {/* Activity cannot stop the loop until every hidden interior-prewarm frame
+          has completed, even if this Canvas is reused without About's guard. */}
+      <ActivityFrameloop active={renderReady && (!warmupReady || active)} />
       <Suspense fallback={null}>
         <Scene
           onFocus={onFocus ?? (() => {})}
@@ -3317,11 +4752,16 @@ export default function CampHero({
           onNavigate={onNavigate}
           onZoom={onZoom}
           onBookOpenRequest={onBookOpenRequest}
-          onExit={onExit}
+          onBookClose={onBookClose}
+          prewarmIndex={prewarmIndex}
         />
         {/* Inside the Suspense boundary, so it runs once the kit and the
             textures are actually here and there is something to compile. */}
-        <Warmup onReady={onReady} />
+        <Warmup
+          onReady={finishWarmup}
+          onPrepared={beginRendering}
+          onPrewarm={setInteriorPrewarm}
+        />
       </Suspense>
     </Canvas>
     </>

@@ -51,24 +51,30 @@ export function attachScrollDriver(
     const t = measure()
     if (t > 0.002) scrollDriver.engaged = true
     scrollDriver.target = t
+    if (raf === 0) raf = requestAnimationFrame(tick)
   }
 
   const tick = () => {
     if (!running) return
+    raf = 0
     const prev = scrollDriver.smooth
     // Snappier when reduced motion is requested — no easing theatre.
     const k = reduced ? 1 : 0.11
     scrollDriver.smooth += (scrollDriver.target - scrollDriver.smooth) * k
     scrollDriver.velocity = scrollDriver.smooth - prev
     onFrame?.(scrollDriver.smooth, scrollDriver.target)
-    raf = requestAnimationFrame(tick)
+    // Once floating-point precision can no longer move the damped value, the
+    // driver is truly idle. The scroll/resize listener starts it again.
+    if (scrollDriver.smooth !== prev) raf = requestAnimationFrame(tick)
   }
 
   onScroll()
   scrollDriver.smooth = scrollDriver.target
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('resize', onScroll)
-  raf = requestAnimationFrame(tick)
+  // onScroll already scheduled the first tick. Do not create a second,
+  // independent damping loop during initialization.
+  if (raf === 0) raf = requestAnimationFrame(tick)
 
   return () => {
     running = false

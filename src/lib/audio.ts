@@ -16,10 +16,13 @@ let ctx: Ctx | null = null
 let master: GainNode | null = null
 let ambientGain: GainNode | null = null
 let fireGain: GainNode | null = null
+let transientNoise: AudioBuffer | null = null
 let windGain: GainNode | null = null
 let crackleTimer = 0
 let started = false
 let muted = false
+
+const TRANSIENT_NOISE_SECONDS = 8
 
 const listeners = new Set<(muted: boolean) => void>()
 
@@ -38,22 +41,61 @@ function noiseBuffer(context: AudioContext, seconds = 2) {
   return buffer
 }
 
+function transientNoiseSource(context: AudioContext, seconds: number) {
+  transientNoise ??= noiseBuffer(context, TRANSIENT_NOISE_SECONDS)
+
+  const source = context.createBufferSource()
+  source.buffer = transientNoise
+
+  // Every one-shot gets a different section of the same primed noise bed. The
+  // requested duration remains identical to the old per-effect buffer length,
+  // while the random offset keeps consecutive bursts from sounding repeated.
+  const duration = Math.min(Math.max(seconds, 1 / context.sampleRate), transientNoise.duration)
+  const availableOffset = transientNoise.duration - duration
+  const offset = availableOffset > 0 ? Math.random() * availableOffset : 0
+
+  return { source, offset, duration }
+}
+
 function ensure(): Ctx | null {
   if (typeof window === 'undefined') return null
   if (ctx) return ctx
   const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
   if (!AC) return null
-  ctx = new AC() as Ctx
+  try {
+    ctx = new AC() as Ctx
+  } catch {
+    return null
+  }
   master = ctx.createGain()
   master.gain.value = 0.0001
   master.connect(ctx.destination)
   return ctx
 }
 
+/**
+ * Builds the suspended Web Audio graph while the loading curtain is present.
+ * Browsers still require a gesture before `resume()`, but graph construction
+ * and the four noise buffers do not. Keeping that work off the first tent click
+ * removes an otherwise visible main-thread pause from the camera transition.
+ */
+export function primeAudio() {
+  const c = ensure()
+  if (!c) return
+  startAmbient()
+}
+
 /** Builds the looping ambience. Safe to call repeatedly. */
 function startAmbient() {
   const c = ensure()
-  if (!c || !master || started) return
+  if (!c || !master) return
+
+  // Prime the reusable one-shot reservoir during the loading screen. Calling
+  // this again is intentionally cheap, and preserves a lazy fallback when
+  // primeAudio() was skipped and audio first starts from a user gesture.
+  transientNoise ??= noiseBuffer(c, TRANSIENT_NOISE_SECONDS)
+
+  if (started) return
   started = true
 
   ambientGain = c.createGain()
@@ -125,8 +167,7 @@ function crackle(strength: number) {
   const c = ctx
   if (!c || !ambientGain) return
   const now = c.currentTime
-  const src = c.createBufferSource()
-  src.buffer = noiseBuffer(c, 0.12)
+  const { source: src, offset, duration } = transientNoiseSource(c, 0.12)
 
   const filter = c.createBiquadFilter()
   filter.type = 'bandpass'
@@ -140,7 +181,7 @@ function crackle(strength: number) {
   gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06 + Math.random() * 0.1)
 
   src.connect(filter).connect(gain).connect(ambientGain)
-  src.start(now)
+  src.start(now, offset, duration)
   src.stop(now + 0.25)
 }
 
@@ -199,8 +240,7 @@ export function sfxEnter() {
   const c = ctx
   if (!c || !master || muted) return
   const now = c.currentTime
-  const src = c.createBufferSource()
-  src.buffer = noiseBuffer(c, 1.6)
+  const { source: src, offset, duration } = transientNoiseSource(c, 1.6)
   const filter = c.createBiquadFilter()
   filter.type = 'lowpass'
   filter.frequency.setValueAtTime(300, now)
@@ -210,7 +250,7 @@ export function sfxEnter() {
   g.gain.exponentialRampToValueAtTime(0.13, now + 0.35)
   g.gain.exponentialRampToValueAtTime(0.0001, now + 1.5)
   src.connect(filter).connect(g).connect(master)
-  src.start(now)
+  src.start(now, offset, duration)
   src.stop(now + 1.7)
 
   blip({ freq: 180, to: 90, duration: 0.7, type: 'sine', gain: 0.06 })
@@ -245,8 +285,8 @@ function paper({
   if (!c || !master || muted) return
 
   const now = c.currentTime + delay
-  const src = c.createBufferSource()
-  src.buffer = noiseBuffer(c, Math.max(duration + 0.2, 0.6))
+  const noiseDuration = Math.max(duration + 0.2, 0.6)
+  const { source: src, offset, duration: sourceDuration } = transientNoiseSource(c, noiseDuration)
 
   // Brown noise is too dark on its own for paper — the band-pass is what puts
   // the sibilance back without making it sound like tape hiss.
@@ -263,7 +303,7 @@ function paper({
   g.gain.exponentialRampToValueAtTime(0.0001, now + duration)
 
   src.connect(band).connect(g).connect(master)
-  src.start(now)
+  src.start(now, offset, sourceDuration)
   src.stop(now + duration + 0.1)
 }
 

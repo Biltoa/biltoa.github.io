@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview --port 4173",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "optimize:assets": "node tools/optimize-runtime-assets.mjs && node tools/strip-kit.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.0.6",

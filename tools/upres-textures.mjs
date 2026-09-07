@@ -33,6 +33,9 @@ const UPRES = [
   ['T_Bench_01_C', 'Props', 'T_Bench_01_C.png', 1024],
   ['T_Bench_01_N', 'Props', 'T_Bench_01_N.png', 1024],
   ['T_Bench_01_R', 'Props', 'T_Bench_01_R.png', 1024],
+  ['T_Bench_01_Indoor_C', 'Props', 'T_Bench_01_C.png', 2048],
+  ['T_Bench_01_Indoor_N', 'Props', 'T_Bench_01_N.png', 2048],
+  ['T_Bench_01_Indoor_R', 'Props', 'T_Bench_01_R.png', 2048],
   // The candlesticks stand either side of the journal, in the same shot.
   ['T_Candle_02_C', 'Props', 'T_Candle_02_C.png', 512],
   ['T_Candle_02_N', 'Props', 'T_Candle_02_N.png', 512],
@@ -60,9 +63,15 @@ for (const [name, folder, file, size] of UPRES) {
   }
 
   const wasBytes = tex.getImage()?.byteLength ?? 0
-  const buf = await sharp(src, { unlimited: true })
+  let image = sharp(src, { unlimited: true })
     .toColourspace('srgb')
-    .resize(size, size, { fit: 'inside', withoutEnlargement: true })
+    .resize(size, size, { fit: 'inside', withoutEnlargement: false })
+
+  if (/T_Bench_01_(?:Indoor_)?[CN]$/.test(name)) {
+    image = image.sharpen({ sigma: 0.8, m1: 0.65, m2: 1.6 })
+  }
+
+  const buf = await image
     .webp({ quality: 88, alphaQuality: 90 })
     .toBuffer()
 

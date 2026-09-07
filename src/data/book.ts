@@ -109,6 +109,16 @@ interface ToolExtra {
 }
 
 const TOOL_EXTRAS: Record<string, ToolExtra> = {
+  'nav-mcp': {
+    how: 'I started NAV MCP after testing another Unity MCP server that exposed 356 tools. Their schemas alone took about 56,800 tokens before the real work started. NAV MCP keeps its queue and scene state outside Unity, so a script recompile does not wipe them. Unity pushes hierarchy changes to a small scene mirror for fast reads, while edits are sent back in batches.',
+    shotCaption: 'The desktop app showing whether the server is running, which mode it is using, and how many Editors are connected.',
+    deltas: [
+      { label: 'MCP tool schemas', before: '56,800 tokens', after: '910 tokens', ratio: 0.016 },
+      { label: 'Scene query', before: '~95 ms', after: '~1 ms', ratio: 0.011 },
+      { label: 'Editor ticks for 32 operations', before: '32', after: '1', ratio: 0.031 },
+    ],
+    note: 'Measured with the project’s own bench tests against a Unity Editor.',
+  },
   'mesh-atlas-builder': {
     how: 'A market stall is twelve renderers and eight materials, and a street holds a hundred and eighty stalls. Packing the textures into one atlas and remapping the UVs collapses the prop to one material, and one material is what lets the copies batch. The occupancy readout is there because a badly packed atlas trades draw calls for texture memory.',
     shotCaption: 'A pass over a twelve-part market stall: the packing preview and the cost on either side.',
@@ -233,7 +243,7 @@ export const bookTools: BookTool[] = projects
       what: p.contributions.slice(0, 3),
       how: extra.how,
       // The lifted, tighter crop — see tools/shoot-unity-tools.mjs.
-      shot: `/media/tools/${p.slug}-book.png`,
+      shot: `/media/tools/${p.slug}-book.webp`,
       shotCaption: extra.shotCaption,
       deltas: extra.deltas,
       note: extra.note,

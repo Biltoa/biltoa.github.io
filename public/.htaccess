@@ -1,0 +1,21 @@
+<IfModule mod_mime.c>
+  # Unity's `.unityweb` files in this project contain Brotli payloads.
+  AddEncoding br .unityweb
+
+  <FilesMatch "\.wasm\.unityweb$">
+    ForceType application/wasm
+  </FilesMatch>
+  <FilesMatch "\.framework\.js\.unityweb$">
+    ForceType application/javascript
+  </FilesMatch>
+  <FilesMatch "\.data\.unityweb$">
+    ForceType application/octet-stream
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.unityweb$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+    Header append Vary "Accept-Encoding"
+  </FilesMatch>
+</IfModule>

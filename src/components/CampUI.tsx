@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { profile } from '../data/profile'
+import { GRAPHICS_DPR } from '../lib/graphics'
 
 /* -------------------------------------------------------------------------- */
 /*  DOM layer for the campsite concept: the name block with its ember drift,    */
@@ -23,79 +24,38 @@ interface Particle {
 
 const CURSOR_COLORS = [42, 30, 18] // amber → orange → ember red, as HSL hues
 
-/**
- * Frame-time readout in the top right corner, so "does it feel smooth" can be
- * answered with a number instead of an opinion.
- *
- * On by default, in the shipped build as much as in dev — `?fps=0` turns it
- * off. A dev-only meter cannot measure the build that is actually slow: the
- * production bundle is a different program, with different React, no
- * StrictMode and minified everything.
- *
- * Three figures, and the third is the one to watch. A scene that averages sixty
- * but drops a forty-millisecond frame every second feels far worse than one
- * sitting steadily at forty-five, and an average alone hides exactly that.
- */
-const FPS_WINDOW_MS = 500
-
-function FpsMeter() {
-  const ref = useRef<HTMLDivElement>(null)
-  const on =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('fps') !== '0'
-
-  useEffect(() => {
-    if (!on) return
-    let raf = 0
-    let last = performance.now()
-    let frames = 0
-    let elapsed = 0
-    let worst = 0
-    const tick = (now: number) => {
-      const dt = now - last
-      last = now
-      frames++
-      elapsed += dt
-      if (dt > worst) worst = dt
-      if (elapsed > FPS_WINDOW_MS) {
-        if (ref.current) {
-          // Written straight to textContent rather than through state: this
-          // runs twice a second for the life of the page, and re-rendering the
-          // whole overlay to move three numbers is the sort of thing a frame
-          // meter should be the last component in the tree to do.
-          ref.current.textContent = `${Math.round((frames * 1000) / elapsed)} fps · ${(
-            elapsed / frames
-          ).toFixed(1)}ms avg · ${worst.toFixed(1)}ms worst`
-        }
-        frames = 0
-        elapsed = 0
-        worst = 0
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [on])
-
-  if (!on) return null
-  return <div className="fpsmeter" ref={ref} aria-hidden="true" />
-}
+const PARTICLES_ENABLED =
+  !import.meta.env.DEV ||
+  typeof window === 'undefined' ||
+  new URLSearchParams(window.location.search).get('particles') !== '0'
 
 export default function CampUI({
   active,
+  particlesActive = true,
   inRoom = false,
   showBookHint = false,
+  showPageHint = false,
 }: {
   active: boolean
+  /** False while another full-stage renderer (the Unity player) owns the view. */
+  particlesActive?: boolean
   inRoom?: boolean
   /** True once inside a tent whose journal hasn't been opened yet. */
   showBookHint?: boolean
+  /** True while the journal is open and its full-page gestures are active. */
+  showPageHint?: boolean
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const cursorRef = useRef<HTMLDivElement>(null)
   const nameRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLSpanElement>(null)
   const bookHintRef = useRef<HTMLSpanElement>(null)
+  const pageHintRef = useRef<HTMLSpanElement>(null)
+  const particlesActiveRef = useRef(particlesActive)
+
+  useEffect(() => {
+    particlesActiveRef.current = particlesActive
+  }, [particlesActive])
 
   /**
    * Sequences the name/tent-hint group against the book hint so exactly one
@@ -105,8 +65,14 @@ export default function CampUI({
    * the same commit when a tent is entered: one faded out while the other
    * faded in, and for a beat both were half-visible over each other.
    */
-  type Label = 'name' | 'book' | null
-  const target: Label = !inRoom ? 'name' : showBookHint ? 'book' : null
+  type Label = 'name' | 'book' | 'pages' | null
+  const target: Label = !inRoom
+    ? 'name'
+    : showBookHint
+      ? 'book'
+      : showPageHint
+        ? 'pages'
+        : null
   const [label, setLabel] = useState<Label>(target)
   useEffect(() => {
     if (label === target) return
@@ -127,23 +93,46 @@ export default function CampUI({
 
     let width = 0
     let height = 0
-    let dpr = 1
-
     const resize = () => {
-      dpr = Math.min(window.devicePixelRatio || 1, 2)
       width = canvas.clientWidth
       height = canvas.clientHeight
-      canvas.width = Math.floor(width * dpr)
-      canvas.height = Math.floor(height * dpr)
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      canvas.width = Math.floor(width * GRAPHICS_DPR)
+      canvas.height = Math.floor(height * GRAPHICS_DPR)
+      ctx.setTransform(GRAPHICS_DPR, 0, 0, GRAPHICS_DPR, 0, 0)
     }
     resize()
-    window.addEventListener('resize', resize)
 
     const cursorParticles: Particle[] = []
     const nameEmbers: Particle[] = []
     const hintEmbers: Particle[] = []
     const labelEmbers: Particle[] = []
+    const particlePool: Particle[] = []
+
+    const spawn = (
+      list: Particle[],
+      x: number,
+      y: number,
+      vx: number,
+      vy: number,
+      maxLife: number,
+      size: number,
+      hue: number
+    ) => {
+      const particle = particlePool.pop()
+      if (particle) {
+        particle.x = x
+        particle.y = y
+        particle.vx = vx
+        particle.vy = vy
+        particle.life = 0
+        particle.maxLife = maxLife
+        particle.size = size
+        particle.hue = hue
+        list.push(particle)
+      } else {
+        list.push({ x, y, vx, vy, life: 0, maxLife, size, hue })
+      }
+    }
 
     const pointer = { x: -999, y: -999, px: -999, py: -999, down: false }
     let raf = 0
@@ -171,62 +160,172 @@ export default function CampUI({
       for (let i = 0; i < count; i++) {
         const angle = Math.random() * Math.PI * 2
         const speed = 0.2 + Math.random() * 1.1
-        cursorParticles.push({
-          x: pointer.x + (Math.random() - 0.5) * 10,
-          y: pointer.y + (Math.random() - 0.5) * 10,
-          vx: Math.cos(angle) * speed,
+        spawn(
+          cursorParticles,
+          pointer.x + (Math.random() - 0.5) * 10,
+          pointer.y + (Math.random() - 0.5) * 10,
+          Math.cos(angle) * speed,
           // Embers rise.
-          vy: Math.sin(angle) * speed - 0.55,
-          life: 0,
-          maxLife: 40 + Math.random() * 45,
-          size: 0.8 + Math.random() * 2.2,
-          hue: CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0],
-        })
+          Math.sin(angle) * speed - 0.55,
+          40 + Math.random() * 45,
+          0.8 + Math.random() * 2.2,
+          CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0]
+        )
       }
     }
 
     /**
      * Every corner informer that gets the name block's ember drift behind it.
      *
-     * Queried per spawn rather than held as refs: two of these three are
-     * rendered by the page rather than by this component (the sound toggle and
-     * the way out of a tent both belong to the room's controls), and a lookup
-     * eight times a second is cheaper than threading refs through two more
-     * component boundaries to reach them.
+     * Two of these three are rendered by the page rather than by this component
+     * (the sound toggle and the way out of a tent both belong to the room's
+     * controls), so resolve them when an ember is due. In particular, the back
+     * control does not exist until a tent is entered.
      */
     const LABELS = '.campui__hint, .audioswitch, .doorback'
+    const EMITTERS = `.campui__name, ${LABELS}`
+
+    interface CachedEmitter {
+      element: Element
+      rect: DOMRect
+    }
+
+    let nameEmitter: CachedEmitter | null = null
+    let hintEmitters: CachedEmitter[] = []
+    let labelEmitters: CachedEmitter[] = []
+    let emittersDirty = true
+    const movingEmitters = new Map<Element, Set<string>>()
+
+    const cached = (element: Element | null): CachedEmitter | null =>
+      element ? { element, rect: element.getBoundingClientRect() } : null
+
+    /**
+     * Resolve the handful of DOM emitters once, then keep their rectangles hot.
+     * getBoundingClientRect/querySelectorAll in the permanent particle loop
+     * forced a synchronous layout several times a second even when the page was
+     * perfectly still.
+     */
+    const refreshEmitters = () => {
+      nameEmitter = cached(nameRef.current)
+      hintEmitters = [hintRef.current, bookHintRef.current, pageHintRef.current]
+        .map(cached)
+        .filter((emitter): emitter is CachedEmitter => emitter !== null)
+      labelEmitters = Array.from(document.querySelectorAll(LABELS))
+        .map(cached)
+        .filter((emitter): emitter is CachedEmitter => emitter !== null)
+      emittersDirty = false
+    }
+
+    const everyEmitter = () =>
+      nameEmitter ? [nameEmitter, ...hintEmitters, ...labelEmitters] : [...hintEmitters, ...labelEmitters]
+
+    // A hidden/visible label and a hovered button translate while transitioning.
+    // Re-read only those moving roots (and their cursor-glyph descendants), and
+    // only on a frame where an ember will actually use the rectangle.
+    const refreshMovingEmitterRects = () => {
+      if (movingEmitters.size === 0) return
+      for (const emitter of everyEmitter()) {
+        for (const root of movingEmitters.keys()) {
+          if (root === emitter.element || root.contains(emitter.element)) {
+            emitter.rect = emitter.element.getBoundingClientRect()
+            break
+          }
+        }
+      }
+    }
+
+    const onResize = () => {
+      resize()
+      emittersDirty = true
+    }
+    const onScroll = () => {
+      emittersDirty = true
+    }
+    window.addEventListener('resize', onResize)
+    window.addEventListener('scroll', onScroll, { passive: true })
+
+    const transitionRoot = (target: EventTarget | null) => {
+      if (!(target instanceof Element) || !target.matches(EMITTERS)) return null
+      return target
+    }
+    const onTransitionRun = (event: TransitionEvent) => {
+      const root = transitionRoot(event.target)
+      if (!root) return
+      const properties = movingEmitters.get(root) ?? new Set<string>()
+      properties.add(event.propertyName)
+      movingEmitters.set(root, properties)
+    }
+    const onTransitionFinish = (event: TransitionEvent) => {
+      const root = transitionRoot(event.target)
+      if (!root) return
+      const properties = movingEmitters.get(root)
+      properties?.delete(event.propertyName)
+      if (!properties?.size) movingEmitters.delete(root)
+      emittersDirty = true
+    }
+    document.addEventListener('transitionrun', onTransitionRun)
+    document.addEventListener('transitionend', onTransitionFinish)
+    document.addEventListener('transitioncancel', onTransitionFinish)
+
+    const mutationTouchesEmitter = (mutation: MutationRecord) => {
+      const target =
+        mutation.target instanceof Element ? mutation.target : mutation.target.parentElement
+      if (target?.closest(EMITTERS)) return true
+      if (mutation.type !== 'childList') return false
+      return [...mutation.addedNodes, ...mutation.removedNodes].some(
+        (node) => node instanceof Element && (node.matches(EMITTERS) || node.querySelector(EMITTERS))
+      )
+    }
+    const mutationObserver = new MutationObserver((mutations) => {
+      if (mutations.some(mutationTouchesEmitter)) emittersDirty = true
+    })
+    mutationObserver.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['class', 'data-hidden'],
+    })
+
+    let disposed = false
+    const onFontsLoaded = () => {
+      emittersDirty = true
+    }
+    document.fonts.addEventListener('loadingdone', onFontsLoaded)
+    void document.fonts.ready.then(() => {
+      if (!disposed) emittersDirty = true
+    })
+    refreshEmitters()
 
     /** Embers off a whole label, the way the name block sheds them. */
-    const spawnLabelEmber = (el: Element) => {
+    const spawnLabelEmber = ({ element: el, rect: r }: CachedEmitter) => {
       if (el.closest('[data-hidden="true"]')) return
-      const r = el.getBoundingClientRect()
       if (r.width < 1) return
-      labelEmbers.push({
-        x: r.left + Math.random() * r.width,
-        y: r.top + Math.random() * r.height,
-        vx: (Math.random() - 0.5) * 0.25,
-        vy: -0.16 - Math.random() * 0.3,
-        life: 0,
-        maxLife: 90 + Math.random() * 110,
-        size: 0.6 + Math.random() * 1.5,
-        hue: CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0],
-      })
+      spawn(
+        labelEmbers,
+        r.left + Math.random() * r.width,
+        r.top + Math.random() * r.height,
+        (Math.random() - 0.5) * 0.25,
+        -0.16 - Math.random() * 0.3,
+        90 + Math.random() * 110,
+        0.6 + Math.random() * 1.5,
+        CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0]
+      )
     }
 
     const spawnNameEmber = () => {
-      const el = nameRef.current
-      if (!el || el.closest('[data-hidden="true"]')) return
-      const r = el.getBoundingClientRect()
-      nameEmbers.push({
-        x: r.left + Math.random() * r.width,
-        y: r.top + Math.random() * r.height,
-        vx: (Math.random() - 0.5) * 0.25,
-        vy: -0.18 - Math.random() * 0.35,
-        life: 0,
-        maxLife: 120 + Math.random() * 140,
-        size: 0.7 + Math.random() * 1.8,
-        hue: CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0],
-      })
+      if (!nameEmitter || nameEmitter.element.closest('[data-hidden="true"]')) return
+      const r = nameEmitter.rect
+      spawn(
+        nameEmbers,
+        r.left + Math.random() * r.width,
+        r.top + Math.random() * r.height,
+        (Math.random() - 0.5) * 0.25,
+        -0.18 - Math.random() * 0.35,
+        120 + Math.random() * 140,
+        0.7 + Math.random() * 1.8,
+        CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0]
+      )
     }
 
     /**
@@ -236,22 +335,20 @@ export default function CampUI({
      * itself inside a tent, and embers pouring out of nothing is worse than no
      * embers at all.
      */
-    const spawnHintEmber = (ref: React.RefObject<HTMLSpanElement | null>) => {
-      const el = ref.current
+    const spawnHintEmber = ({ element: el, rect: r }: CachedEmitter) => {
       if (!el || el.closest('[data-hidden="true"]')) return
-      const r = el.getBoundingClientRect()
       const a = Math.random() * Math.PI * 2
       const rad = 6 + Math.random() * 7
-      hintEmbers.push({
-        x: r.left + r.width / 2 + Math.cos(a) * rad,
-        y: r.top + r.height / 2 + Math.sin(a) * rad,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: -0.2 - Math.random() * 0.4,
-        life: 0,
-        maxLife: 55 + Math.random() * 70,
-        size: 0.6 + Math.random() * 1.5,
-        hue: CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0],
-      })
+      spawn(
+        hintEmbers,
+        r.left + r.width / 2 + Math.cos(a) * rad,
+        r.top + r.height / 2 + Math.sin(a) * rad,
+        (Math.random() - 0.5) * 0.3,
+        -0.2 - Math.random() * 0.4,
+        55 + Math.random() * 70,
+        0.6 + Math.random() * 1.5,
+        CURSOR_COLORS[(Math.random() * CURSOR_COLORS.length) | 0]
+      )
     }
 
     const draw = (list: Particle[]) => {
@@ -264,6 +361,7 @@ export default function CampUI({
         p.vx *= 0.985
         if (p.life > p.maxLife) {
           list.splice(i, 1)
+          particlePool.push(p)
           continue
         }
         const t = p.life / p.maxLife
@@ -278,37 +376,51 @@ export default function CampUI({
     let nameTimer = 0
 
     const tick = () => {
-      ctx.clearRect(0, 0, width, height)
-      // Additive so overlapping embers build into a glow instead of flat dots.
-      ctx.globalCompositeOperation = 'lighter'
+      if (PARTICLES_ENABLED && !reduced && particlesActiveRef.current) {
+        ctx.clearRect(0, 0, width, height)
+        // Additive so overlapping embers build into a glow instead of flat dots.
+        ctx.globalCompositeOperation = 'lighter'
 
-      const moved = Math.hypot(pointer.x - pointer.px, pointer.y - pointer.py)
-      pointer.px = pointer.x
-      pointer.py = pointer.y
-      if (pointer.x > -100) spawnCursor(moved > 2 ? 2 : Math.random() > 0.72 ? 1 : 0)
+        const moved = Math.hypot(pointer.x - pointer.px, pointer.y - pointer.py)
+        pointer.px = pointer.x
+        pointer.py = pointer.y
+        if (pointer.x > -100) spawnCursor(moved > 2 ? 2 : Math.random() > 0.72 ? 1 : 0)
 
-      nameTimer++
-      if (nameTimer % 4 === 0) spawnNameEmber()
-      if (nameTimer % 7 === 0) {
-        spawnHintEmber(hintRef)
-        spawnHintEmber(bookHintRef)
-        document.querySelectorAll(LABELS).forEach(spawnLabelEmber)
+        nameTimer++
+        const nameDue = nameTimer % 4 === 0
+        const labelsDue = nameTimer % 7 === 0
+        if (nameDue || labelsDue) {
+          if (emittersDirty) refreshEmitters()
+          else refreshMovingEmitterRects()
+        }
+        if (nameDue) spawnNameEmber()
+        if (labelsDue) {
+          hintEmitters.forEach(spawnHintEmber)
+          labelEmitters.forEach(spawnLabelEmber)
+        }
+
+        draw(cursorParticles)
+        draw(nameEmbers)
+        draw(hintEmbers)
+        draw(labelEmbers)
+
+        ctx.globalCompositeOperation = 'source-over'
       }
-
-      draw(cursorParticles)
-      draw(nameEmbers)
-      draw(hintEmbers)
-      draw(labelEmbers)
-
-      ctx.globalCompositeOperation = 'source-over'
       raf = requestAnimationFrame(tick)
     }
 
-    if (!reduced) raf = requestAnimationFrame(tick)
+    if (PARTICLES_ENABLED && !reduced) raf = requestAnimationFrame(tick)
 
     return () => {
+      disposed = true
       cancelAnimationFrame(raf)
-      window.removeEventListener('resize', resize)
+      mutationObserver.disconnect()
+      document.fonts.removeEventListener('loadingdone', onFontsLoaded)
+      document.removeEventListener('transitionrun', onTransitionRun)
+      document.removeEventListener('transitionend', onTransitionFinish)
+      document.removeEventListener('transitioncancel', onTransitionFinish)
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onScroll)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerleave', onLeave)
       window.removeEventListener('pointerdown', onDown)
@@ -320,7 +432,6 @@ export default function CampUI({
 
   return (
     <>
-      <FpsMeter />
       <canvas ref={canvasRef} className="campui__particles" aria-hidden="true" />
 
       <div className="campui__cursor" ref={cursorRef} aria-hidden="true">
@@ -360,6 +471,14 @@ export default function CampUI({
           <i className="campui__hintcursor-dot" />
         </span>
         <span>Click on the book to open</span>
+      </div>
+
+      <div className="campui__hint" aria-hidden="true" data-hidden={label !== 'pages'}>
+        <span className="campui__hintcursor" ref={pageHintRef}>
+          <i className="campui__hintcursor-ring" />
+          <i className="campui__hintcursor-dot" />
+        </span>
+        <span>Click a page or drag it to turn</span>
       </div>
     </>
   )

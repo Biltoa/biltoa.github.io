@@ -32,6 +32,7 @@
  *   --url <url>   full URL, overrides --port.
  *   --stats       print region averages of the shot. See imagestats.mjs.
  *   --ref <png>   compare those averages against a reference frame.
+ *   --loader      capture the loading curtain instead of waiting for the camp.
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
@@ -81,6 +82,7 @@ const url = flag('url', `http://localhost:${port}/${query}`)
 const info = argv.includes('--info')
 const stats = argv.includes('--stats')
 const ref = flag('ref', null)
+const loader = argv.includes('--loader')
 const out = resolve(`tools/shots/${name}.png`)
 
 /* ------------------------------------------------------------------- shoot */
@@ -119,14 +121,27 @@ try {
 
   // The canvas exists long before the scene does: the GLB, the textures and
   // every shader program are still loading behind the loader.
-  await page.waitForSelector('canvas', { timeout: 60_000 })
+  const targetSelector = loader ? '.camploader' : '.hero__canvas canvas'
+  await page.waitForSelector(targetSelector, { timeout: 60_000 })
   await page.waitForFunction(
-    () => {
-      const c = document.querySelector('canvas')
-      return !!c && c.width > 32 && c.height > 32
+    (selector, isLoader) => {
+      const element = document.querySelector(selector)
+      if (!element) return false
+      if (isLoader) {
+        const rect = element.getBoundingClientRect()
+        return rect.width > 32 && rect.height > 32
+      }
+      return element.width > 32 && element.height > 32
     },
-    { timeout: 60_000 }
+    { timeout: 60_000 },
+    targetSelector,
+    loader
   )
+  if (!loader) {
+    await page.waitForFunction(() => !document.querySelector('.camploader'), {
+      timeout: 60_000,
+    })
+  }
 
   await new Promise((r) => setTimeout(r, wait))
 
@@ -135,19 +150,21 @@ try {
 
   // A grey frame is what a silently failed shader compile looks like, and it is
   // indistinguishable from a good run unless something checks the context.
-  const probe = await page.evaluate(() => {
-    const c = document.querySelector('canvas')
-    if (!c) return { why: 'no canvas' }
-    const gl = c.getContext('webgl2') || c.getContext('webgl')
+  const probe = await page.evaluate((selector, isLoader) => {
+    const element = document.querySelector(selector)
+    if (!element) return { why: 'no target' }
+    const rect = element.getBoundingClientRect()
+    if (isLoader) return { renderer: 'loader', why: null, size: [rect.width, rect.height], fps: null }
+    const gl = element.getContext('webgl2') || element.getContext('webgl')
     const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info')
     const fps = document.body.innerText.match(/\d+\s*FPS[^\n]*/i)
     return {
       renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl ? 'unknown' : null,
       why: gl ? null : 'no webgl context',
-      size: [c.width, c.height],
+      size: [element.width, element.height],
       fps: fps ? fps[0] : null,
     }
-  })
+  }, targetSelector, loader)
 
   console.log(`shot   tools/shots/${name}.png  ${probe.size?.join('x')}`)
   if (probe.fps) console.log(`fps    ${probe.fps}`)

@@ -32,8 +32,11 @@ const height = 720
  * changes, which is the point — a probe that cannot miss is not testing much.
  */
 const TARGETS = [
-  { label: 'Realistic Hajwala (games, first)', x: 0.318, y: 0.340, expect: 1 },
-  { label: 'Build Pipeline (tools, last)', x: 0.582, y: 0.465, expect: 15 },
+  { label: 'Realistic Hajwala (games, first)', x: 0.330, y: 0.330, expect: 1 },
+  // Eighteen, not fifteen: the ledger has grown three entries since these
+  // coordinates were last struck, and the probe had been failing on both
+  // counts — a stale target and a stale answer.
+  { label: 'Build Pipeline (tools, last)', x: 0.562, y: 0.425, expect: 18 },
 ]
 
 const browser = await puppeteer.launch({
@@ -62,7 +65,7 @@ try {
       problems.push(stack || e.message)
     })
 
-    await page.goto('http://localhost:5173/?room=2&travel=1&book=1&reveal=1', {
+    await page.goto('http://localhost:5175/?room=2&travel=1&book=1&reveal=1', {
       waitUntil: 'domcontentloaded',
       timeout: 60_000,
     })

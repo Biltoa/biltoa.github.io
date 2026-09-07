@@ -54,6 +54,9 @@ const FLAME_FRAG = /* glsl */ `
   uniform float uDetail;
   uniform float uOpacity;
   uniform float uRise;
+  uniform float uAlphaPower;
+  uniform float uBrightness;
+  uniform float uHeatBias;
   uniform vec3 uCore;
   uniform vec3 uMid;
   uniform vec3 uEdge;
@@ -91,12 +94,13 @@ const FLAME_FRAG = /* glsl */ `
     // Torn tip: the same turbulence that bends the flame also eats its top.
     float tip = 1.0 - smoothstep(0.34 + turb * 0.62, 1.0, y);
 
-    float a = body * tip * (0.82 + 0.32 * uFlicker) * uOpacity;
+    float shapedBody = pow(clamp(body, 0.0, 1.0), uAlphaPower);
+    float a = shapedBody * tip * (0.82 + 0.32 * uFlicker) * uOpacity;
     if (a < 0.004) discard;
 
     // Heat runs hottest low and dead centre; that is what puts a white core in
     // the fire instead of a uniformly orange blob.
-    float heat = clamp(body * 1.45 - y * 0.9 + turb * 0.22, 0.0, 1.0);
+    float heat = clamp(body * 1.45 - y * 0.9 + turb * 0.22 - uHeatBias, 0.0, 1.0);
     vec3 col = mix(uEdge, uMid, smoothstep(0.04, 0.48, heat));
     col = mix(col, uCore, smoothstep(0.56, 0.99, heat));
 
@@ -107,14 +111,10 @@ const FLAME_FRAG = /* glsl */ `
     float blueZone = (1.0 - smoothstep(0.0, 0.22, y)) * (1.0 - smoothstep(0.0, 0.55, radial));
     col = mix(col, vec3(0.32, 0.52, 1.0), blueZone * 0.6);
 
-    // Kept under 1 at the core.
-    //
-    // These layers bypass tone mapping (they are additive glows, not lit
-    // surfaces) and three of them stack, so anything that puts a single layer
-    // near white clips the sum — and a clipped flame is a featureless white
-    // tongue with none of the heat ramp visible in it. The ramp is the whole
-    // point of doing the fire in a shader.
-    gl_FragColor = vec4(col * (0.62 + 0.30 * uFlicker), a);
+    // Alpha-composited and tone mapped. Additive crossed planes sum to white at
+    // the centre and bloom into a bulb; normal compositing preserves the hot
+    // yellow/orange/red ramp and keeps the silhouette readable.
+    gl_FragColor = vec4(col * (0.82 + 0.18 * uFlicker) * uBrightness, a);
   }
 `
 
@@ -125,6 +125,14 @@ export interface FlameOptions {
   opacity?: number
   /** How fast the turbulence climbs. */
   rise?: number
+  /** Higher values narrow translucent edges without hard clipping them. */
+  alphaPower?: number
+  /** Source-specific radiance control; defaults preserve torch/candle output. */
+  brightness?: number
+  /** Opt-in luminous blending for large fire only; torches stay alpha blended. */
+  additive?: boolean
+  /** Pushes pale core colour toward the lower centre of large flames. */
+  heatBias?: number
   core?: string
   mid?: string
   edge?: string
@@ -136,6 +144,10 @@ export function makeFlameMaterial(opts: FlameOptions = {}) {
     detail = 1,
     opacity = 1,
     rise = 1.45,
+    alphaPower = 1,
+    brightness = 1,
+    additive = false,
+    heatBias = 0,
     core = '#ffeeb4',
     mid = '#ff9a1c',
     edge = '#b52605',
@@ -151,15 +163,18 @@ export function makeFlameMaterial(opts: FlameOptions = {}) {
       uDetail: { value: detail },
       uOpacity: { value: opacity },
       uRise: { value: rise },
+      uAlphaPower: { value: alphaPower },
+      uBrightness: { value: brightness },
+      uHeatBias: { value: heatBias },
       uCore: { value: new THREE.Color(core) },
       uMid: { value: new THREE.Color(mid) },
       uEdge: { value: new THREE.Color(edge) },
     },
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     side: THREE.DoubleSide,
-    toneMapped: false,
+    toneMapped: !additive,
     fog: false,
   })
 }
@@ -186,8 +201,10 @@ const SMOKE_FRAG = /* glsl */ `
     float dissolve = smoothstep(0.0, 0.55, 1.0 - uLife) * smoothstep(0.0, 0.16, uLife);
     float a = edge * dissolve * uOpacity;
     if (a < 0.004) discard;
-    // Warm at birth (still lit by the fire), cold and grey once it has climbed.
-    vec3 col = mix(vec3(0.85, 0.55, 0.35), uColor, smoothstep(0.0, 0.4, uLife));
+    // Newly emitted smoke is only subtly warmed by the fire. A saturated
+    // orange birth colour turns overlapping puffs into a second flame-shaped
+    // column and obscures the actual tongues beneath it.
+    vec3 col = mix(vec3(0.38, 0.34, 0.31), uColor, smoothstep(0.0, 0.32, uLife));
     gl_FragColor = vec4(col, a);
   }
 `
@@ -276,6 +293,112 @@ export function makeSmokeMaterial(seed = 0, color = '#c9b6cf', opacity = 0.38) {
     },
     transparent: true,
     depthWrite: false,
+    toneMapped: false,
+    fog: false,
+  })
+}
+
+/* ---------------------------------------------------------- torch smoke */
+
+/**
+ * Smoother than the campfire puff: torch smoke is seen as a narrow continuous
+ * plume, so high-frequency edge breakup reads as torn polygons at this scale.
+ * A low-frequency warp keeps the contour alive while the broad feathered edge
+ * lets neighbouring particles blend into one soft wisp.
+ */
+const TORCH_SMOKE_FRAG = /* glsl */ `
+  varying vec2 vUv;
+  uniform float uTime;
+  uniform float uLife;
+  uniform float uSeed;
+  uniform vec3 uColor;
+  uniform float uOpacity;
+
+  ${NOISE}
+
+  // Curl of a scalar noise potential: the perpendicular gradient produces a
+  // divergence-free 2D velocity field, which gives smoke rolling motion
+  // without repeatedly swelling and shrinking like an ordinary noise warp.
+  vec2 curlField(vec2 p) {
+    float e = 0.075;
+    float dNoiseDx = fnoise(p + vec2(e, 0.0)) - fnoise(p - vec2(e, 0.0));
+    float dNoiseDy = fnoise(p + vec2(0.0, e)) - fnoise(p - vec2(0.0, e));
+    return vec2(dNoiseDy, -dNoiseDx) / (2.0 * e);
+  }
+
+  void main() {
+    float density = 0.0;
+    float warmDensity = 0.0;
+
+    // Repeated density injection at the flame. Each lobe rises under buoyancy,
+    // expands as it cools, follows the same slow wind, and receives a curl-noise
+    // displacement. Their soft union creates folds and billows while remaining
+    // a coherent plume instead of a line or a stack of sprites.
+    for (int i = 0; i < 8; i++) {
+      float fi = float(i);
+      float age = fract(uTime * 0.082 + fi / 8.0 + fract(uSeed * 0.137));
+      float buoyantRise = pow(age, 0.72);
+      float inject = smoothstep(0.0, 0.09, age);
+      float dissipate = 1.0 - smoothstep(0.68, 1.0, age);
+
+      vec2 curl = curlField(vec2(buoyantRise * 1.7 - uTime * 0.035, uSeed * 0.19));
+      curl = clamp(curl * 0.16, vec2(-1.0), vec2(1.0));
+      float windDirection = sin(uTime * 0.085) * 0.09 + sin(uTime * 0.031 + 1.7) * 0.04;
+      float wind = buoyantRise * buoyantRise * windDirection;
+      float roll = sin(buoyantRise * 8.5 + uTime * 0.28 + uSeed) * 0.21 * buoyantRise;
+      float localEddy =
+        sin(fi * 2.4 + uSeed * 1.3 + uTime * 0.12) *
+        smoothstep(0.38, 1.0, buoyantRise) *
+        0.042;
+
+      vec2 centre = vec2(
+        0.5 + wind + curl.x * 0.16 * buoyantRise + roll + localEddy,
+        0.025 + buoyantRise * 0.91 + curl.y * 0.035 * buoyantRise
+      );
+      float radiusX = mix(0.045, 0.17, buoyantRise) * (0.92 + 0.08 * sin(fi * 2.4 + uSeed));
+      float radiusY = radiusX * mix(1.45, 1.0, buoyantRise);
+      vec2 local = (vUv - centre) / vec2(radiusX, radiusY);
+      local += curl * 0.075 * buoyantRise;
+
+      float lobe = exp(-dot(local, local) * 1.7) * inject * dissipate;
+      density += lobe;
+      warmDensity += lobe * (1.0 - age);
+    }
+
+    // Optical-density union: overlapping injections merge smoothly without
+    // clipping brighter where they intersect. Very low-frequency modulation
+    // adds internal folds but never cuts holes through the silhouette.
+    density = 1.0 - exp(-density * 0.92);
+    float fold = 0.82 + ffbm(vec2(vUv * vec2(1.25, 2.1) + vec2(uSeed, -uTime * 0.07))) * 0.18;
+    float edgeFade = smoothstep(0.0, 0.025, vUv.y) * (1.0 - smoothstep(0.92, 1.0, vUv.y));
+    // Retain definition close to the flame, then shed density quickly. By the
+    // upper half only ten percent remains, preventing a dark cloud from hanging
+    // visibly above each torch against the night canopy.
+    float heightFade = mix(1.0, 0.1, smoothstep(0.34, 0.58, vUv.y));
+    float alpha = density * fold * edgeFade * heightFade * uOpacity;
+    if (alpha < 0.002) discard;
+
+    vec3 warmGrey = vec3(0.33, 0.31, 0.29);
+    float warmth = clamp(warmDensity / max(density, 0.001), 0.0, 1.0);
+    vec3 colour = mix(uColor, warmGrey, warmth * 0.45);
+    gl_FragColor = vec4(colour, alpha);
+  }
+`
+
+export function makeTorchSmokeMaterial(seed = 0, color = '#414a54', opacity = 0.05) {
+  return new THREE.ShaderMaterial({
+    vertexShader: FLAME_VERT,
+    fragmentShader: TORCH_SMOKE_FRAG,
+    uniforms: {
+      uTime: { value: 0 },
+      uLife: { value: 0 },
+      uSeed: { value: seed },
+      uColor: { value: new THREE.Color(color) },
+      uOpacity: { value: opacity },
+    },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
     toneMapped: false,
     fog: false,
   })

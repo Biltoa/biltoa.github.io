@@ -4,14 +4,31 @@ import { profile } from '../data/profile'
 import { projects } from '../data/projects'
 import { useReveal } from '../lib/hooks'
 import { attachScrollDriver } from '../lib/scroll'
-import { isMuted, resumeAudio, setMuted, stopAudio, subscribeAudio } from '../lib/audio'
+import { isMuted, primeAudio, resumeAudio, setMuted, stopAudio, subscribeAudio } from '../lib/audio'
+import { markProfileEvent } from '../lib/performanceProfile'
 import CampLoader, { type LoadStage } from '../components/CampLoader'
 import type { PageScreenRect } from '../three/campsite/Book'
 
 const CampHero = lazy(() => import('../three/CampHero'))
 const CampUI = lazy(() => import('../components/CampUI'))
-const BookPlayer = lazy(() => import('../components/BookPlayer'))
-const BookZoom = lazy(() => import('../components/BookZoom'))
+
+type BookPlayerModule = typeof import('../components/BookPlayer')
+type BookZoomModule = typeof import('../components/BookZoom')
+let bookPlayerModule: Promise<BookPlayerModule> | undefined
+let bookZoomModule: Promise<BookZoomModule> | undefined
+const loadBookPlayer = () =>
+  (bookPlayerModule ??= import('../components/BookPlayer').catch((error) => {
+    bookPlayerModule = undefined
+    throw error
+  }))
+const loadBookZoom = () =>
+  (bookZoomModule ??= import('../components/BookZoom').catch((error) => {
+    bookZoomModule = undefined
+    throw error
+  }))
+
+const BookPlayer = lazy(loadBookPlayer)
+const BookZoom = lazy(loadBookZoom)
 
 /**
  * Longest the curtain is allowed to stay up.
@@ -29,6 +46,8 @@ const LOADER_TIMEOUT_MS = 20000
 
 export default function About() {
   const navigate = useNavigate()
+  const impostorInspection =
+    import.meta.env.DEV && new URLSearchParams(window.location.search).has('impostors')
 
   // ?room=1 deep-links straight inside a tent, which is also how the interiors
   // get screenshotted without waiting out the whole walk-in.
@@ -49,6 +68,12 @@ export default function About() {
   */
   const [stage, setStage] = useState<LoadStage>('boot')
   const [assetProgress, setAssetProgress] = useState(0)
+  // Unlike `stage`, this is not advanced by the loader's escape-hatch timeout.
+  // It stays false until CampHero has really finished shader/texture prewarm,
+  // so an offscreen or background load cannot pause halfway through preparing
+  // the first interactive frame.
+  const [campReady, setCampReady] = useState(false)
+  const loaderStartedAt = useRef(performance.now())
 
   const handleProgress = useCallback((p: number) => {
     setAssetProgress(p)
@@ -58,6 +83,7 @@ export default function About() {
   }, [])
 
   const handleReady = useCallback(() => {
+    setCampReady(true)
     setStage('ready')
   }, [])
 
@@ -69,8 +95,16 @@ export default function About() {
 
   useEffect(() => {
     if (stage === 'ready') return
-    const t = setTimeout(() => setStage('ready'), LOADER_TIMEOUT_MS)
+    // One absolute deadline for the whole load. Restarting a fresh 20-second
+    // timer at every stage could leave a failed boot/assets/compile sequence
+    // behind the curtain for close to a minute.
+    const remaining = Math.max(0, loaderStartedAt.current + LOADER_TIMEOUT_MS - performance.now())
+    const t = setTimeout(() => setStage('ready'), remaining)
     return () => clearTimeout(t)
+  }, [stage])
+
+  useEffect(() => {
+    markProfileEvent('load-stage', { category: 'camp', detail: stage })
   }, [stage])
 
   /*
@@ -89,12 +123,80 @@ export default function About() {
   }, [stage])
 
   const heroRef = useRef<HTMLDivElement>(null)
+  const [heroVisible, setHeroVisible] = useState(true)
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible'
+  )
+
+  // Stop the expensive camp loops only when none of the hero can be seen. The
+  // section, rather than the sticky child, is observed so it remains active for
+  // the complete 260vh scroll-driven composition.
+  useEffect(() => {
+    const hero = heroRef.current
+    if (!hero || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(([entry]) => {
+      setHeroVisible(entry.isIntersecting)
+    })
+    observer.observe(hero)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      setDocumentVisible(document.visibilityState === 'visible')
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
+
+  // The activity gate must never interrupt loading/prewarm. In particular,
+  // LOADER_TIMEOUT_MS may reveal the page before a slow driver's real warmup
+  // finishes; `campReady`, unlike `stage`, only changes on Warmup's callback.
+  const campActive = !campReady || (heroVisible && documentVisible)
+
+  // CampHero's first progress report proves its own large chunk has already
+  // arrived. Only then, and in an idle slice behind the opaque curtain, fetch
+  // the two tiny journal-overlay chunks. Their promises are shared with lazy(),
+  // so the first play/zoom gesture cannot introduce a new module wait.
+  const coreCampScheduled = stage !== 'boot'
+  useEffect(() => {
+    if (!coreCampScheduled) return
+    const preloadJournalOverlays = () => {
+      void Promise.allSettled([loadBookPlayer(), loadBookZoom()])
+    }
+    const w = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(preloadJournalOverlays, { timeout: 2000 })
+      return () => w.cancelIdleCallback?.(id)
+    }
+    const id = window.setTimeout(preloadJournalOverlays, 250)
+    return () => window.clearTimeout(id)
+  }, [coreCampScheduled])
 
   useEffect(() => {
     const off = subscribeAudio(setAudioMuted)
     return () => {
       off()
     }
+  }, [])
+
+  // AudioContext creation and noise-buffer synthesis are allowed before the
+  // autoplay gesture even though playback is not. Do them behind the loading
+  // curtain so the first tent click only resumes an already-built graph.
+  useEffect(() => {
+    const w = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(primeAudio, { timeout: 1000 })
+      return () => w.cancelIdleCallback?.(id)
+    }
+    const id = window.setTimeout(primeAudio, 160)
+    return () => window.clearTimeout(id)
   }, [])
 
   // Browsers refuse to start audio without a gesture, so the ambience waits for
@@ -128,6 +230,35 @@ export default function About() {
 
   const inRoom = entered !== null
 
+  // Absorb only a rapid repeat press on the Back-to-fire control while that
+  // control fades away. This prevents the second click falling through to the
+  // canvas without changing the campsite's existing hover/re-entry timing.
+  const [guardingBackClick, setGuardingBackClick] = useState(false)
+  const backClickTimer = useRef<number | null>(null)
+  const handleBackToFire = useCallback(() => {
+    if (entered === null || guardingBackClick) return
+    setGuardingBackClick(true)
+    setEntered(null)
+    if (backClickTimer.current !== null) window.clearTimeout(backClickTimer.current)
+    backClickTimer.current = window.setTimeout(() => {
+      backClickTimer.current = null
+      setGuardingBackClick(false)
+    }, 360)
+  }, [entered, guardingBackClick])
+  useEffect(
+    () => () => {
+      if (backClickTimer.current !== null) window.clearTimeout(backClickTimer.current)
+    },
+    []
+  )
+
+  useEffect(() => {
+    markProfileEvent(entered === null ? 'tent-exited' : 'tent-entered', {
+      category: 'navigation',
+      detail: entered === null ? 'camp' : `tent-${entered}`,
+    })
+  }, [entered])
+
   /** Mirrors `playingFrom` for handlers that must not re-bind when it changes. */
   const playingRef = useRef<PageScreenRect | null>(null)
   /** Same, for the picture overlay. */
@@ -140,6 +271,15 @@ export default function About() {
   useEffect(() => {
     if (entered === null) setBookRequested(false)
   }, [entered])
+
+  // Opening a journal is a strong signal that its playable build may be next.
+  // Start the browser-level preload here so the 255MB payload can overlap the
+  // reader's page turns instead of beginning on the final Play click.
+  useEffect(() => {
+    if (!bookRequested) return
+    markProfileEvent('journal-opened', { category: 'navigation', detail: `tent-${entered}` })
+    void loadBookPlayer().then(({ preloadUnityBuild }) => preloadUnityBuild())
+  }, [bookRequested, entered])
 
   /**
    * Where the gameplay build is playing from, or null if it is not.
@@ -169,6 +309,9 @@ export default function About() {
   )
   useEffect(() => {
     playingRef.current = playingFrom
+    markProfileEvent(playingFrom === null ? 'player-closed' : 'player-requested', {
+      category: 'player',
+    })
   }, [playingFrom])
 
   useEffect(() => {
@@ -178,6 +321,19 @@ export default function About() {
   useEffect(() => {
     if (entered === null) setPlayingFrom(null)
   }, [entered])
+
+  // Unity owns the entire visible stage while its player is mounted. Keep the
+  // campsite alive in memory, but stop its R3F and particle render work so the
+  // two WebGL contexts do not compete for the same frame budget. Startup
+  // prewarm remains uninterruptible if the dev-only ?play=1 shortcut is used.
+  const campRenderActive = !campReady || (campActive && playingFrom === null)
+
+  useEffect(() => {
+    markProfileEvent(campRenderActive ? 'renderer-resumed' : 'renderer-paused', {
+      category: 'camp',
+      detail: playingFrom === null ? 'camp owns stage' : 'Unity owns stage',
+    })
+  }, [campRenderActive, playingFrom])
 
   // Walking into a tent takes over the viewport, so the page must not scroll
   // underneath it. Restore the exact position on the way out.
@@ -245,6 +401,7 @@ export default function About() {
         <div className="hero__stage">
           <Suspense fallback={<div className="hero__canvas" />}>
             <CampHero
+              active={campRenderActive}
               entered={entered}
               onEnter={setEntered}
               onNavigate={(to, from) => {
@@ -259,19 +416,25 @@ export default function About() {
               }}
               onZoom={(src, from) => setZoomed({ src, from })}
               onBookOpenRequest={() => setBookRequested(true)}
-              onExit={() => setEntered(null)}
+              onBookClose={() => setBookRequested(false)}
               onProgress={handleProgress}
               onReady={handleReady}
             />
           </Suspense>
 
-          <Suspense fallback={null}>
-            <CampUI
-              active
-              inRoom={inRoom}
-              showBookHint={inRoom && !bookRequested && playingFrom === null}
-            />
-          </Suspense>
+          {!impostorInspection && (
+            <Suspense fallback={null}>
+              <CampUI
+                active={campActive}
+                particlesActive={campRenderActive}
+                inRoom={inRoom}
+                showBookHint={inRoom && !bookRequested && playingFrom === null}
+                showPageHint={
+                  inRoom && bookRequested && playingFrom === null && zoomed === null
+                }
+              />
+            </Suspense>
+          )}
 
           {playingFrom && (
             <Suspense fallback={null}>
@@ -285,25 +448,30 @@ export default function About() {
             </Suspense>
           )}
 
-          <button
-            className="tentswitch audioswitch"
-            onClick={() => setMuted(!audioMuted)}
-            aria-pressed={!audioMuted}
-            aria-label={audioMuted ? 'Unmute ambience' : 'Mute ambience'}
-          >
-            {audioMuted ? '🔇 Sound off' : '🔊 Sound on'}
-          </button>
+          {!impostorInspection && (
+            <>
+              <button
+                className="tentswitch audioswitch"
+                onClick={() => setMuted(!audioMuted)}
+                aria-pressed={!audioMuted}
+                aria-label={audioMuted ? 'Unmute ambience' : 'Mute ambience'}
+              >
+                {audioMuted ? '🔇 Sound off' : '🔊 Sound on'}
+              </button>
 
-          <button
-            className="doorback"
-            data-hidden={!inRoom || playingFrom !== null || zoomed !== null}
-            onClick={() => setEntered(null)}
-            tabIndex={inRoom && playingFrom === null && zoomed === null ? 0 : -1}
-          >
-            ← Back to the fire <kbd>Esc</kbd>
-          </button>
+              <button
+                className="doorback"
+                data-hidden={!inRoom || playingFrom !== null || zoomed !== null}
+                data-guarding={guardingBackClick}
+                onClick={handleBackToFire}
+                tabIndex={inRoom && playingFrom === null && zoomed === null ? 0 : -1}
+              >
+                ← Back to the fire
+              </button>
 
-          <div className="hero__overlay" data-dim={inRoom} />
+              <div className="hero__overlay" data-dim={inRoom} />
+            </>
+          )}
         </div>
       </section>
 

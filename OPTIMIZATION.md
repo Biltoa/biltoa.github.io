@@ -916,3 +916,71 @@ re-checking if anything new starts writing to them.
   capturing, so hover states can be screenshotted on the **production** build
   where the `?hot=` freeze does not exist.
 * `--scroll <px>` — scrolls the page before capturing.
+
+---
+
+# Final zero-visual-change pass — 2026-09-04
+
+The constraint for this pass was stricter than the earlier passes: one graphics
+preset on every device, and no visible downgrade anywhere — especially not on
+the journal pages.
+
+## Recovery point
+
+The complete pre-pass project was copied to:
+
+`E:\Portfolio Project Backups\Portfolio Project-20260904-204807`
+
+The verification compared 1,454 files / 2,413,331,046 bytes with zero missing or
+size-mismatched files. Generated dependencies and build output were excluded;
+the source, runtime assets and authoring files are all present.
+
+## Runtime work removed
+
+* Replaced adaptive DPR feedback with the single approved DPR 1 preset. The WebGL
+  scene and the full-screen UI particle canvas now use the same fixed value on
+  every device; there are no device quality tiers.
+* Production no longer asks the browser to multisample its final drawing buffer.
+  The visible scene is rendered by the composer's own non-MSAA target and copied
+  with a full-screen triangle, so canvas MSAA has no scene edges to resolve.
+  Development retains it only for the raw `?post=0` diagnostic view.
+* Merged the FPS meter into the UI particle animation loop and pooled expired UI
+  ember objects, removing a permanent RAF and steady object churn.
+* The scroll damper now stops when floating-point precision reaches rest and is
+  restarted by scroll/resize. Its accidental second initialization RAF was also
+  removed.
+* Reused camera scratch vectors, skipped stable tent-emissive writes, precomputed
+  firefly exclusion rotations, and changed hot particle/leaf loops to direct
+  indexed typed-array writes.
+* Removed the unused foliage `uFirePos` uniform and its every-frame vector copy.
+  It was never declared or read by the shader.
+* Hoisted aurora loop invariants and skipped its 40-step, five-octave field march
+  outside the exact zero endpoints of the existing band envelope. A controlled
+  old/new render showed no aurora-body difference.
+* Removed the obsolete impostor-only fog shader branch. The approved scene no
+  longer renders impostors.
+
+## Shipping payload
+
+Thirty-two authoring/obsolete files that were being copied into every deployment
+were moved, not deleted, to `tools/source/`. This includes Blender source files,
+alternate model exports, removed impostor textures and texture previews. The
+runtime `public/` payload changed from 1,075,216,778 to 298,435,974 bytes —
+776,780,804 bytes (72.2%) no longer shipped. The final `dist/` is 300,097,438
+bytes, most of which is the real on-demand Unity WebGL build.
+
+## Measurements and acceptance checks
+
+The in-app browser is GPU-bound by the approved aurora and alpha-cutout forest.
+The final production lobby sample held 43–44 FPS / 22.5–23.5 ms, versus a noisy
+42–44 FPS / 23.5–24.6 ms baseline. The tent interior held 53–55 FPS / 18.3–18.7
+ms. This is a modest frame-time improvement, not a quality-for-speed trade.
+
+Validation included production typecheck/build, the lobby, left/right parallax
+extremes, all three tent interiors, all three open journals, and controlled
+old/new aurora and framebuffer captures. The book geometry, page materials,
+page textures and all book-light values were untouched.
+
+The larger measured GPU levers were rejected: fewer bloom levels, one-sided
+foliage, lower resolution, reduced particles, removed lights, lower shadow
+quality, and disabling the aurora all visibly change the approved frame.

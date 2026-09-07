@@ -18,10 +18,16 @@ import { normalMapFromCanvas } from './stone'
  * the type in one axis, which on a serif face is immediately obvious.
  *
  * A half is `0.5 - PAGE_GUTTER` across, so this is `(0.5 - PAGE_GUTTER) *
- * PAGE_H / PAGE_W` = 0.498 * 1180 / 796. It went 0.72 -> 0.738 when the page
- * blocks were closed up to the fold and each half got wider by the difference.
+ * PAGE_H / PAGE_W` = 0.498 * 1280 / 796. It went 0.72 -> 0.738 when the page
+ * blocks were closed up to the fold and each half got wider by the difference,
+ * and 0.738 -> 0.801 when the page canvas was made taller.
+ *
+ * The taller page is what makes the shut journal a portrait book rather than a
+ * slab: a board 0.50 across and 0.80 deep reads as a journal, one 0.50 by 0.74
+ * read as a squarish box. The canvas grew with it (`PAGE_H`), so the type is
+ * the same size on the paper — the page simply has more foot to it.
  */
-export const PAGE_DEPTH = 0.738
+export const PAGE_DEPTH = 0.801
 /**
  * Half-width of the gap the *boards* leave for the spine.
  *
@@ -280,7 +286,7 @@ export function buildPageBlock(side: 'left' | 'right', nx = 26, nz = 4): PageBlo
 export function buildCover(side: 'left' | 'right') {
   const w = 0.5 - GUTTER + SQUARE
   const d = PAGE_DEPTH + SQUARE * 2
-  const r = 0.022
+  const r = 0.014
 
   const shape = new THREE.Shape()
   const hw = w / 2
@@ -295,14 +301,14 @@ export function buildCover(side: 'left' | 'right') {
   shape.lineTo(-hw, -hd + r)
   shape.quadraticCurveTo(-hw, -hd, -hw + r, -hd)
 
-  const bevel = 0.0035
+  const bevel = 0.0025
   const g = new THREE.ExtrudeGeometry(shape, {
     depth: COVER_T - bevel * 2,
     bevelEnabled: true,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 2,
-    curveSegments: 5,
+    bevelSegments: 1,
+    curveSegments: 2,
   })
   // Extrusion runs along +Z; stand it up so it runs along +Y instead.
   g.rotateX(-Math.PI / 2)
@@ -323,7 +329,7 @@ export function buildCover(side: 'left' | 'right') {
 export function buildSpine() {
   const halfW = GUTTER + 0.008
   const d = PAGE_DEPTH + SQUARE * 2
-  const SEG = 14
+  const SEG = 8
   const pos: number[] = []
   const uv: number[] = []
   const idx: number[] = []
@@ -483,17 +489,9 @@ export function buildGutter() {
 export type Binding = 'leather' | 'cloth' | 'copper'
 
 /**
- * Which binding each tent's journal is in, by book index.
- *
- * All three now. The cloth field book and the copper ledger each carried their
- * own mark, their own corner furniture and a treeline along the foot, and three
- * differently-furnished boards read as three unrelated props rather than as one
- * camp's journals. They are the same boarded, gold-ruled journal; only the
- * leather's colour changes. See `BOARD_GROUND`.
- *
- * The type and the branches are kept: they cost nothing, and the covers were
- * three separate objects recently enough that having the second and third
- * treatments recoverable is worth more than deleting them.
+ * All three tents use the About journal's leather construction. Their dyed
+ * hides differ, but the board, spine, bevel, grain, and stamped layout remain
+ * one coherent set instead of three unrelated bindings.
  */
 export const BINDINGS: Binding[] = ['leather', 'leather', 'leather']
 
@@ -506,9 +504,16 @@ export const BINDINGS: Binding[] = ['leather', 'leather', 'leather']
  * tint it belongs to and is only pulled a few per cent toward it in
  * `makeLeatherMaps`.
  *
- * Wine, navy, bronze: About, Gameplay, Projects.
+ * Dropped roughly a stop and a half from where they were. Each tent's own lamp
+ * is a strong single colour a short distance from the board, and albedo is a
+ * multiplier on it: a #1c2c50 navy under the Gameplay tent's blue came back as
+ * #2a63c4 — royal-blue plastic rather than leather in a dark tent. What the
+ * board wants is a value low enough that the candles are what lift it, so the
+ * face stays dark and the highlights are the only bright thing on it.
+ *
+ * Wine, navy, forest teal: About, Gameplay, Projects.
  */
-export const BOARD_GROUND = ['#3a1218', '#1c2c50', '#33240c']
+export const BOARD_GROUND = ['#2b0e13', '#2b2115', '#132d2b']
 
 /**
  * Cover material: grain, a scatter of wear, and a rule inset from the edge.
@@ -521,14 +526,26 @@ export function makeLeatherMaps(
   binding: Binding = 'leather',
   ground?: string
 ) {
+  /*
+    Drawing units, and the pixels they are drawn into.
+
+    Everything below is written against a 512-unit board and rendered into a
+    1024px map. The gilt rule is the reason: it is a line about one and a half
+    units wide, and at one texel per unit — on a board that covers some 550
+    screen pixels — the mip chain and the anisotropic filter had it for
+    breakfast. What came back was the dark impression under the rule with no
+    metal left in it, which read as a scored line rather than as tooling.
+  */
   const size = 512
+  const px = 1024
   const c = document.createElement('canvas')
-  c.width = c.height = size
+  c.width = c.height = px
   // CPU-backed, because the albedo painted here is read straight back out
   // again as the height field for the normal map below — see the note in
   // stone.ts. The hint only applies on the first getContext call for a canvas,
   // so it has to be set here rather than where the read happens.
   const ctx = c.getContext('2d', { willReadFrequently: true })!
+  ctx.scale(px / size, px / size)
 
   let s = seed >>> 0 || 3
   const rnd = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296)
@@ -594,13 +611,21 @@ export function makeLeatherMaps(
     }
   } else {
     // Grain: overlapping soft cells, which is what leather actually is.
-    for (let i = 0; i < 2600; i++) {
+    //
+    // Small, dense and mostly dark. The first pass scattered half its cells at
+    // full white up to nine pixels across, which at the board's tiling came out
+    // as a cloudy white mottle — the board read as polished marble. Real grain
+    // is a pit pattern: the light half is only the shoulder between the pits,
+    // so it is both rarer and far fainter than the dark half.
+    for (let i = 0; i < 4200; i++) {
       const x = rnd() * size
       const y = rnd() * size
-      const r = 2 + rnd() * 9
+      const r = 1.2 + rnd() * 4.2
       const g = ctx.createRadialGradient(x, y, 0, x, y, r)
-      const v = rnd() > 0.5 ? 255 : 0
-      g.addColorStop(0, `rgba(${v},${v},${v},${0.03 + rnd() * 0.035})`)
+      const lit = rnd() > 0.78
+      const v = lit ? 210 : 0
+      const a = lit ? 0.012 + rnd() * 0.016 : 0.022 + rnd() * 0.03
+      g.addColorStop(0, `rgba(${v},${v},${v},${a})`)
       g.addColorStop(1, `rgba(${v},${v},${v},0)`)
       ctx.fillStyle = g
       ctx.beginPath()
@@ -609,140 +634,31 @@ export function makeLeatherMaps(
     }
   }
 
-  // Creases: long faint lines running with the hide.
+  // Creases: a few faint lines running with the hide.
+  //
+  // Ninety of them, wandering 90px a segment at up to 8% black, is not a crease
+  // pattern — it is a scratched surface, and it was the other half of what made
+  // the board read as something hard and damaged rather than as leather. Two
+  // dozen short shallow ones are enough to break the grain up.
   ctx.lineCap = 'round'
-  for (let i = 0; i < (binding === 'leather' ? 90 : 40); i++) {
-    ctx.strokeStyle = `rgba(0,0,0,${0.03 + rnd() * 0.05})`
-    ctx.lineWidth = 1 + rnd() * 2.5
+  for (let i = 0; i < (binding === 'leather' ? 24 : 40); i++) {
+    ctx.strokeStyle = `rgba(0,0,0,${0.018 + rnd() * 0.028})`
+    ctx.lineWidth = 1 + rnd() * 1.6
     ctx.beginPath()
     let x = rnd() * size
     let y = rnd() * size
     ctx.moveTo(x, y)
-    for (let k = 0; k < 5; k++) {
-      x += (rnd() - 0.5) * 90
-      y += (rnd() - 0.5) * 90
+    for (let k = 0; k < 4; k++) {
+      x += (rnd() - 0.5) * 46
+      y += (rnd() - 0.5) * 46
       ctx.lineTo(x, y)
     }
     ctx.stroke()
   }
 
-  // The double rule inset from the edge. On the leather journal it is blind —
-  // an impression, drawn as a dark stroke with a lit one offset out of it. The
-  // cloth and copper boards carry it as gilt and as an oxidised line instead,
-  // which is what those two materials actually take.
-  const inset = 34
-  const RULES: Record<Binding, [number, string, number][]> = {
-    // Gilt, not blind. A blind rule is an impression, and an impression on a
-    // board this small at this distance is a smudge — the border simply was not
-    // there. Tooled in gold it is the one line that says "bound" rather than
-    // "textured rectangle", and it is what the reference board carries.
-    leather: [
-      [0, 'rgba(18,10,4,0.55)', 6],
-      [-2, 'rgba(214,172,96,0.85)', 3],
-    ],
-    cloth: [
-      [0, 'rgba(0,0,0,0.45)', 5],
-      [-1, 'rgba(214,170,98,0.62)', 2.4],
-    ],
-    copper: [
-      [0, 'rgba(20,12,6,0.45)', 5],
-      [-1, 'rgba(96,190,175,0.55)', 2.4],
-    ],
-  }
-  for (const [off, col, wdt] of RULES[binding]) {
-    ctx.strokeStyle = col
-    ctx.lineWidth = wdt
-    ctx.strokeRect(inset + off, inset + off, size - (inset + off) * 2, size - (inset + off) * 2)
-    ctx.strokeRect(
-      inset + 14 + off,
-      inset + 14 + off,
-      size - (inset + 14 + off) * 2,
-      size - (inset + 14 + off) * 2
-    )
-  }
-
-  /*
-    Two brass clasp straps down one edge.
-
-    The board's UVs are its own extent mapped onto 0..1 (see the repeat below),
-    so u = 0 is one long edge of the board and u = 1 is the other; which of them
-    ends up at the spine on the front cover is fixed by the extrude and the flip
-    and was found by looking at the render rather than derived. They are drawn
-    into the board map rather than into the title plate so they take the room's
-    light like the rest of the leather — an unlit strap on a lit board reads as
-    a sticker.
-  */
-  {
-    const h = size * 0.052
-    const w = size * 0.085
-    const x = size - w
-    for (const cy of [size * 0.26, size * 0.74]) {
-      const y = cy - h / 2
-      const g = ctx.createLinearGradient(x, y, x, y + h)
-      g.addColorStop(0, '#e6c186')
-      g.addColorStop(0.42, '#c39a53')
-      g.addColorStop(1, '#8a6a33')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      // Rounded on the inboard end only; the outboard end runs off the edge of
-      // the board the way a strap wrapping the spine does.
-      const r = h * 0.35
-      ctx.moveTo(x + r, y)
-      ctx.lineTo(size, y)
-      ctx.lineTo(size, y + h)
-      ctx.lineTo(x + r, y + h)
-      ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-      ctx.lineTo(x, y + r)
-      ctx.quadraticCurveTo(x, y, x + r, y)
-      ctx.closePath()
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(38,24,10,0.55)'
-      ctx.lineWidth = 2
-      ctx.stroke()
-      // A dark seam down the middle, so the strap has a fold rather than being
-      // a flat lozenge.
-      ctx.strokeStyle = 'rgba(46,30,12,0.35)'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(x + r, cy)
-      ctx.lineTo(size, cy)
-      ctx.stroke()
-    }
-  }
-
-  // Metal corner protectors on the field book. All four, because the board's
-  // UVs are mapped from its own extent and which corner of the texture ends up
-  // where on the front board is not something this function gets to know.
-  if (binding === 'cloth') {
-    const arm = 64
-    for (const [cx, cy, sx, sy] of [
-      [0, 0, 1, 1],
-      [size, 0, -1, 1],
-      [0, size, 1, -1],
-      [size, size, -1, -1],
-    ] as [number, number, number, number][]) {
-      ctx.save()
-      ctx.translate(cx, cy)
-      ctx.scale(sx, sy)
-      const g = ctx.createLinearGradient(0, 0, arm, arm)
-      g.addColorStop(0, '#e0bb78')
-      g.addColorStop(0.55, '#b98f4e')
-      g.addColorStop(1, '#8d6a35')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      ctx.moveTo(0, 0)
-      ctx.lineTo(arm, 0)
-      ctx.lineTo(arm * 0.62, arm * 0.38)
-      ctx.lineTo(arm * 0.38, arm * 0.62)
-      ctx.lineTo(0, arm)
-      ctx.closePath()
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(40,26,10,0.5)'
-      ctx.lineWidth = 2
-      ctx.stroke()
-      ctx.restore()
-    }
-  }
+  // Cover furniture is painted on the separate, perfectly centred title plate
+  // in paintCover. ExtrudeGeometry's side-wall UVs are intentionally atlas-like,
+  // so a border drawn into this tiled surface can drift toward an edge.
 
   const map = new THREE.CanvasTexture(c)
   map.colorSpace = THREE.SRGBColorSpace

@@ -4,6 +4,58 @@
    Every colour is a token so the dark theme is a token swap, not a rewrite.
    ========================================================================= */
 
+/* Exact Google Fonts Latin WOFF2 files, self-hosted to remove two DNS/TLS
+   handshakes and the render-blocking remote stylesheet without changing the
+   glyph outlines or metrics. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 900;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url('/fonts/archivo-latin-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Archivo Black';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/archivo-black-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'EB Garamond';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/eb-garamond-latin-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'EB Garamond';
+  font-style: italic;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/eb-garamond-italic-latin-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('/fonts/inter-latin-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-var.woff2') format('woff2');
+}
+
 :root {
   /* palette */
   --paper: #efe9df;
@@ -623,15 +675,30 @@ select {
   text-transform: uppercase;
   color: #ffc477;
   text-shadow: 0 0 16px rgba(255, 150, 60, 0.45);
-  padding: 0;
+  padding: 8px 10px;
+  margin: -8px -10px;
   border: none;
-  background: none;
+  border-radius: 5px;
+  background: rgba(24, 9, 24, 0);
+  box-shadow: 0 0 0 1px rgba(255, 196, 119, 0);
   cursor: pointer;
-  transition: opacity 0.35s var(--ease), color 0.2s;
+  transform-origin: left center;
+  transition: opacity 0.35s var(--ease), color 0.2s, transform 0.22s var(--ease),
+    text-shadow 0.2s, background-color 0.2s, box-shadow 0.2s;
 }
 
-.doorback:hover {
-  color: #ffd98a;
+.doorback:hover,
+.doorback:focus-visible {
+  color: #ffe5ad;
+  background: rgba(24, 9, 24, 0.48);
+  box-shadow: 0 0 0 1px rgba(255, 196, 119, 0.22), 0 0 22px rgba(255, 139, 55, 0.16);
+  text-shadow: 0 0 10px rgba(255, 229, 173, 0.55), 0 0 22px rgba(255, 137, 48, 0.68);
+  transform: translateY(-1px) scale(1.045);
+  outline: none;
+}
+
+.doorback:active {
+  transform: translateY(0) scale(0.985);
 }
 
 .doorback kbd {
@@ -645,6 +712,12 @@ select {
 .doorback[data-hidden='true'] {
   opacity: 0;
   pointer-events: none;
+}
+
+/* Keep only the just-clicked control's small footprint alive through its fade,
+   so a double click cannot fall through to a tent beneath it. */
+.doorback[data-hidden='true'][data-guarding='true'] {
+  pointer-events: auto;
 }
 
 /* --------------------------------------------------- concept 04: campsite */
@@ -764,7 +837,7 @@ select {
      the full value back (see .tentsign.is-hot). */
   color: rgba(255, 246, 228, 0.72);
   white-space: nowrap;
-  text-shadow: 0 2px 10px rgba(30, 8, 20, 0.9), 0 0 14px color-mix(in srgb, var(--tent-color) 45%, transparent);
+  text-shadow: 0 2px 10px rgba(30, 8, 20, 0.9), 0 0 14px color-mix(in srgb, var(--tent-glow) 45%, transparent);
   transition: color 0.25s, text-shadow 0.25s, letter-spacing 0.25s;
 }
 
@@ -778,18 +851,24 @@ select {
   height: 40px;
   margin-top: 2px;
   overflow: visible;
+  shape-rendering: geometricPrecision;
   animation: tent-chevron 1.9s var(--ease) infinite;
-  /* Glow on the group, not on each path: stacked drop-shadows on siblings
-     bloom each other's halos and the whole sign goes to mush. */
-  filter: drop-shadow(0 0 4px var(--tent-color)) drop-shadow(0 0 12px var(--tent-color))
-    drop-shadow(0 0 28px color-mix(in srgb, var(--tent-color) 70%, transparent))
-    drop-shadow(0 0 56px color-mix(in srgb, var(--tent-color) 40%, transparent));
 }
 
 .tentsign__arrow path {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The tube alone is rasterized for glow. Keeping the filter off the SVG root
+   leaves the white filament as a native vector path instead of caching the
+   complete arrow into a small blurred texture. */
+.tentsign__tube {
+  filter: drop-shadow(0 0 4px var(--tent-glow)) drop-shadow(0 0 12px var(--tent-glow))
+    drop-shadow(0 0 28px color-mix(in srgb, var(--tent-glow) 70%, transparent))
+    drop-shadow(0 0 56px color-mix(in srgb, var(--tent-glow) 40%, transparent));
 }
 
 /* The tube: the wide coloured stroke that carries the glow. */
@@ -815,12 +894,12 @@ select {
 }
 
 .tentsign__core .tentsign__chev {
-  stroke-width: 2;
+  stroke-width: 2.25;
 }
 
 .tentsign__core .tentsign__rail {
-  stroke-width: 1;
-  opacity: 0.7;
+  stroke-width: 1.5;
+  opacity: 0.82;
 }
 
 @keyframes tent-chevron {
@@ -835,79 +914,18 @@ select {
   }
 }
 
-/* Trail of beads running down toward the doorway, in the tent's own colour —
-   white beads read as a loading spinner, not as a lit path. */
-.tentsign__trail {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 15px;
-  margin-top: 14px;
-}
-
-/* A dim tube running the length of the trail, with the beads travelling down
-   it. Beads on their own are a dotted line; the rail is what makes them read
-   as a lit path down to the doorway. */
-.tentsign__trail::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--tent-color) 75%, transparent),
-    transparent
-  );
-  filter: blur(0.5px) drop-shadow(0 0 6px var(--tent-color));
-  opacity: 0.55;
-}
-
-.tentsign__trail i {
-  position: relative;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  /* White-hot centre falling off to the tent's colour, same idea as the
-     chevron's filament — a flat fill reads as a dot, not as a lamp. */
-  background: radial-gradient(circle at 50% 50%, #fff6ec 0%, var(--tent-color) 55%);
-  box-shadow: 0 0 4px #fff6ec, 0 0 10px var(--tent-color), 0 0 22px var(--tent-color),
-    0 0 40px color-mix(in srgb, var(--tent-color) 75%, transparent),
-    0 0 70px color-mix(in srgb, var(--tent-color) 40%, transparent);
-  opacity: 0.4;
-  animation: tent-bead 1.6s ease-in-out infinite;
-}
-
-@keyframes tent-bead {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.7);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1.3);
-  }
-}
-
 .tentsign.is-hot {
-  transform: translateY(-4px);
+  transform: translateY(0);
 }
 
 .tentsign.is-hot .tentsign__label {
-  color: var(--tent-color);
+  color: var(--tent-glow);
   letter-spacing: 0.14em;
-  text-shadow: 0 2px 10px rgba(30, 8, 20, 0.9), 0 0 34px var(--tent-color);
+  text-shadow: 0 2px 10px rgba(30, 8, 20, 0.9), 0 0 34px var(--tent-glow);
 }
 
 .tentsign.is-hot .tentsign__arrow {
   animation-duration: 1s;
-}
-
-.tentsign.is-hot .tentsign__trail i {
-  animation-duration: 0.9s;
 }
 
 /* ------------------------------------------------------- campsite overlay */
@@ -1158,17 +1176,31 @@ body.camp-hover .campui__cursor-ring {
   text-transform: uppercase;
   color: #ffc477;
   text-shadow: 0 0 16px rgba(255, 150, 60, 0.45);
-  padding: 0;
+  padding: 8px 10px;
+  margin: -8px -10px;
   border: none;
-  background: none;
+  background: rgba(24, 9, 24, 0);
+  box-shadow: 0 0 0 1px rgba(255, 196, 119, 0);
   backdrop-filter: none;
-  border-radius: 0;
+  border-radius: 5px;
   cursor: pointer;
-  transition: color 0.2s;
+  transform-origin: left center;
+  transition: color 0.2s, transform 0.22s var(--ease), text-shadow 0.2s,
+    background-color 0.2s, box-shadow 0.2s;
 }
 
-.tentswitch.audioswitch:hover {
-  color: #ffd98a;
+.tentswitch.audioswitch:hover,
+.tentswitch.audioswitch:focus-visible {
+  color: #ffe5ad;
+  background: rgba(24, 9, 24, 0.48);
+  box-shadow: 0 0 0 1px rgba(255, 196, 119, 0.22), 0 0 22px rgba(255, 139, 55, 0.16);
+  text-shadow: 0 0 10px rgba(255, 229, 173, 0.55), 0 0 22px rgba(255, 137, 48, 0.68);
+  transform: translateY(-1px) scale(1.045);
+  outline: none;
+}
+
+.tentswitch.audioswitch:active {
+  transform: translateY(0) scale(0.985);
 }
 
 /* Tent style A/B switch, next to the concept switcher. */
@@ -1224,6 +1256,20 @@ body.camp-hover .campui__cursor-ring {
   .tentsign__trail i,
   .campui__hintcursor-ring {
     animation: none;
+  }
+
+  .doorback,
+  .tentswitch.audioswitch {
+    transition: color 0.2s, text-shadow 0.2s, background-color 0.2s, box-shadow 0.2s;
+  }
+
+  .doorback:hover,
+  .doorback:focus-visible,
+  .doorback:active,
+  .tentswitch.audioswitch:hover,
+  .tentswitch.audioswitch:focus-visible,
+  .tentswitch.audioswitch:active {
+    transform: none;
   }
 }
 
@@ -2355,7 +2401,10 @@ body.camp-hover .campui__cursor-ring {
   /* Held off the transition until the scene says it is ready, so the fade never
      runs over a frame that is not there yet. */
   opacity: 1;
-  transition: opacity 0.6s var(--ease);
+  transform: translateZ(0);
+  contain: paint;
+  will-change: opacity;
+  transition: opacity 0.22s cubic-bezier(0.4, 0, 1, 1);
 }
 
 .camploader[data-done='true'] {
@@ -2364,11 +2413,59 @@ body.camp-hover .campui__cursor-ring {
 }
 
 .camploader__inner {
+  position: relative;
   display: grid;
   justify-items: center;
   gap: 18px;
   padding: 0 var(--gutter);
   text-align: center;
+}
+
+.camploader__embers {
+  position: absolute;
+  z-index: 0;
+  inset: -96px -110px -82px;
+  pointer-events: none;
+  contain: layout style;
+}
+
+.camploader__embers i {
+  position: absolute;
+  left: var(--ember-x);
+  top: var(--ember-y);
+  width: var(--ember-size);
+  height: var(--ember-size);
+  border-radius: 50%;
+  background: #ffc35c;
+  box-shadow:
+    0 0 var(--ember-glow) rgba(255, 190, 82, 0.95),
+    0 0 calc(var(--ember-glow) * 2.4) rgba(255, 108, 28, 0.52);
+  opacity: 0;
+  transform: translate3d(0, 10px, 0) scale(0.45);
+  animation: camploader-float var(--ember-duration) linear var(--ember-delay) infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes camploader-float {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.45);
+  }
+  16% {
+    opacity: 0.95;
+  }
+  72% {
+    opacity: 0.48;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--ember-drift), var(--ember-rise), 0) scale(0.2);
+  }
+}
+
+.camploader__inner > :not(.camploader__embers) {
+  position: relative;
+  z-index: 1;
 }
 
 /* Three ember diamonds, breathing on the same offsets the campfire flickers on
@@ -2425,10 +2522,34 @@ body.camp-hover .campui__cursor-ring {
 }
 
 .camploader__rail {
+  position: relative;
   width: min(280px, 62vw);
   height: 2px;
   background: rgba(255, 186, 96, 0.16);
   overflow: hidden;
+}
+
+/* Independent of measured progress. This transform-only sweep stays alive on
+   Chrome's compositor while the page thread is inside a WebGL driver call. */
+.camploader__rail::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: -1px;
+  bottom: -1px;
+  left: -30%;
+  width: 24%;
+  background: linear-gradient(90deg, transparent, rgba(255, 237, 194, 0.95), transparent);
+  filter: drop-shadow(0 0 5px rgba(255, 168, 72, 0.9));
+  transform: translate3d(0, 0, 0);
+  animation: camploader-rail-sweep 1.35s linear infinite;
+  will-change: transform;
+}
+
+@keyframes camploader-rail-sweep {
+  to {
+    transform: translate3d(550%, 0, 0);
+  }
 }
 
 /* Scaled rather than sized: a transform is the one property that can be
@@ -2455,7 +2576,9 @@ body.camp-hover .campui__cursor-ring {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .camploader__fire i {
+  .camploader__fire i,
+  .camploader__embers i,
+  .camploader__rail::after {
     animation: none;
     opacity: 0.85;
   }
@@ -2465,52 +2588,6 @@ body.camp-hover .campui__cursor-ring {
 html.is-loading,
 html.is-loading body {
   overflow: hidden;
-}
-
-/* ---------------------------------------------------------------- fps meter */
-
-/* Top right, over everything, always on unless ?fps=0. Dressed in the camp's
-   own furniture — the same amber-on-dark pill the sound toggle uses — so a
-   permanent readout sits in the frame as part of the site rather than as a
-   debug overlay somebody forgot to take out. */
-
-.fpsmeter {
-  position: fixed;
-  top: 22px;
-  right: var(--gutter);
-  z-index: 120;
-  pointer-events: none;
-  font-family: var(--font-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #ffba60;
-  padding: 7px 13px;
-  border: 1px solid rgba(255, 200, 130, 0.28);
-  border-radius: 999px;
-  background: rgba(20, 9, 28, 0.7);
-  backdrop-filter: blur(8px);
-  /* Empty until the first window closes — an empty pill is worse than none. */
-  min-width: 0;
-}
-
-.fpsmeter:empty {
-  display: none;
-}
-
-/* The Unity build draws its own pause control in the top right of its canvas,
-   which is exactly where this pill sits. Stepped left for as long as the
-   player is up, rather than moved permanently — everywhere else the corner is
-   the right place for it. */
-body:has(.bookplayer) .fpsmeter {
-  right: calc(var(--gutter) + 86px);
-}
-
-@media (max-width: 760px) {
-  .fpsmeter {
-    font-size: 0.52rem;
-    padding: 6px 10px;
-  }
 }
 
 /* --------------------------------------------------------------- bookplayer */
@@ -2984,12 +3061,6 @@ body.camp-zoom {
     bottom: 10px;
   }
 
-  /* The FPS readout is a dev affordance and it is the one thing up there wide
-     enough to cover a tent's label. */
-  .fpsmeter {
-    transform: scale(0.72);
-    transform-origin: 100% 0;
-  }
 }
 
 /*

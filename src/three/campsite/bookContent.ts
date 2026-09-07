@@ -141,7 +141,7 @@ const ABOUT: Spread[] = [
       { k: 'fact', label: 'Currently', value: 'Pursuing independent projects' },
       { k: 'gap', h: 14 },
       { k: 'rule' },
-      { k: 'fact', label: 'Downloads', value: '100,000+ solo · 10M+ studio' },
+      { k: 'fact', label: 'Downloads', value: '200,000+ solo · 10M+ studio' },
       { k: 'fact', label: 'Titles shipped', value: '3 solo titles, 7 studio titles' },
       { k: 'gap', h: 18 },
       { k: 'link', text: profile.email, to: `mailto:${profile.email}` },
@@ -239,9 +239,9 @@ const GAMEPLAY: Spread[] = [
       {
         k: 'snaps',
         srcs: [
-          '/media/build/snap-1.png',
-          '/media/build/snap-2.png',
-          '/media/build/snap-3.png',
+          '/media/build/snap-1.webp',
+          '/media/build/snap-2.webp',
+          '/media/build/snap-3.webp',
         ],
         h: 560,
       },
@@ -254,7 +254,7 @@ const GAMEPLAY: Spread[] = [
       // the build opens out of this plate rather than replacing the scene.
       {
         k: 'image',
-        src: '/media/build/straight.png',
+        src: '/media/build/straight.webp',
         h: 420,
         fit: 'cover',
         to: 'play:gameplay',
@@ -347,7 +347,7 @@ function toolResult(t: BookTool): Line[] {
       caption: t.shotCaption,
       // Pressing the plate opens the uncropped capture, which is the one you
       // can actually read the window in.
-      zoom: `/media/tools/${t.slug}.png`,
+      zoom: `/media/tools/${t.slug}.webp`,
     },
     // A kicker is drawn on its baseline, so it climbs into whatever is above
     // it unless something makes room first.
@@ -420,3 +420,10 @@ export const bookSpreads = (index: number): Spread[] => BOOKS[index] ?? ABOUT
 
 /** Shown on the closed cover. */
 export const BOOK_TITLE = ['About', 'Gameplay', 'Projects']
+
+/** Individual collection line stamped above each closed-cover title. */
+export const BOOK_COVER_SUBTITLE = [
+  'THE STORY SO FAR',
+  'THE CRAFT OF GAME FEEL',
+  'IDEAS MADE REAL',
+]

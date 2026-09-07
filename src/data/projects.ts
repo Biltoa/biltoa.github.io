@@ -83,7 +83,7 @@ export const projects: Project[] = [
     role: 'Solo developer, publisher, and UA operator',
     team: 'Solo',
     blurb:
-      'Self-published drift and cruise game past 100,000 downloads, with Photon multiplayer, live-ops, and paid UA I ran myself down to a $0.0019 Android CPI.',
+      'Self-published drift and cruise game past 200,000 downloads, with Photon multiplayer, live-ops, and paid UA I ran myself down to a $0.0019 Android CPI.',
     overview: [
       'This Arabian driving and drifting game focuses on authentic Gulf style street sliding and vehicle tuning. It features both singleplayer and multiplayer modes, in-depth vehicle customization and tuning, traffic vehicles, and multiple maps.',
       'This is my solo title, from concept and code through release and everything that has come after it. Shipping it was the easy half. The interesting half has been the months since: reading retention curves, changing the early session loop, rebalancing ad placement, and buying users cheaply enough that the economics actually close.',
@@ -104,16 +104,16 @@ export const projects: Project[] = [
     ],
     tech: ['Unity3D', 'C#', 'Photon PUN2', 'AdMob', 'GameAnalytics', 'Firebase', 'Meta Ads'],
     metrics: [
-      { value: '100K+', label: 'Total downloads' },
+      { value: '200K+', label: 'Total downloads' },
       { value: '30K', label: 'Android MAU' },
       { value: '$0.0019', label: 'Android CPI' },
-      { value: '32.6%', label: 'iOS Day-1 retention' },
+      { value: '38%', label: 'iOS Day-1 retention' },
     ],
     links: [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.TazigraLLC.RealisticHajwala&hl=en' },
       { label: 'App Store', href: 'https://apps.apple.com/jo/app/realistic-hajwala/id6744271585' },
     ],
-    thumb: '/media/games/realistic-hajwala.png',
+    thumb: '/media/games/realistic-hajwala.webp',
   },
   {
     slug: 'gravity-grid',
@@ -153,7 +153,7 @@ export const projects: Project[] = [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.tazigra.gravitygrid' },
       { label: 'App Store', href: 'https://apps.apple.com/jo/app/gravity-grid-color-drop/id6794268530' },
     ],
-    thumb: '/media/games/gravity-grid.png',
+    thumb: '/media/games/gravity-grid.webp',
   },
   {
     slug: 'word-shift',
@@ -193,7 +193,7 @@ export const projects: Project[] = [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.tazigra.wordshift&hl=en' },
       { label: 'App Store', href: 'https://apps.apple.com/jo/app/word-shift-brain-puzzle/id6778904644' },
     ],
-    thumb: '/media/games/word-shift.png',
+    thumb: '/media/games/word-shift.webp',
   },
   {
     slug: 'highway-drifter-online',
@@ -238,7 +238,7 @@ export const projects: Project[] = [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.madboxgames.drifter' },
       { label: 'App Store', href: 'https://apps.apple.com/np/app/highway-drifter-hajwala-online/id1415516694' },
     ],
-    thumb: '/media/games/highway-drifter-online.png',
+    thumb: '/media/games/highway-drifter-online.webp',
   },
   {
     slug: 'highway-drifter-mobile',
@@ -276,19 +276,19 @@ export const projects: Project[] = [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.Untitled.CarPhysics' },
       { label: 'App Store', href: 'https://apps.apple.com/np/app/uhd-hajwala-drift-simulator/id6443678969' },
     ],
-    thumb: '/media/games/highway-drifter-mobile.png',
+    thumb: '/media/games/highway-drifter-mobile.webp',
   },
   {
     slug: 'amer-fighting',
     title: 'Amer Fighting',
-    subtitle: 'Steam · PS4 / PS5',
+    subtitle: 'Steam · PS5',
     type: 'game',
     year: 2025,
     period: '2024 to 2025',
     status: 'Shipped',
     accent: 'red',
     tags: ['Console', 'Fighting', 'Certification'],
-    platforms: ['Steam', 'PS4', 'PS5'],
+    platforms: ['Steam', 'PS5'],
     engine: 'Unity 3D',
     role: 'Unity developer',
     team: 'Mad Hook',
@@ -309,7 +309,7 @@ export const projects: Project[] = [
       'Platform-specific requirements, from controller disconnection to suspend and resume to save semantics, are handled at the boundary rather than inside gameplay.',
     ],
     tech: ['Unity3D', 'C#', 'Steamworks', 'PS5 SDK', 'Git'],
-    metrics: [{ value: '3', label: 'Platforms' }],
+    metrics: [{ value: '2', label: 'Platforms' }],
     links: [
       { label: 'Steam', href: 'https://store.steampowered.com/app/3264920/Amer_Fighting/' },
       { label: 'PlayStation', href: 'https://store.playstation.com/en-us/concept/10010443/' },
@@ -326,7 +326,7 @@ export const projects: Project[] = [
     status: 'Live',
     accent: 'yellow',
     tags: ['Live-ops', 'Mobile', 'Console'],
-    platforms: ['iOS', 'Android', 'PS4', 'PS5'],
+    platforms: ['iOS', 'Android', 'PS5'],
     engine: 'Unity 3D',
     role: 'Unity developer',
     team: 'Mad Hook',
@@ -345,13 +345,13 @@ export const projects: Project[] = [
       'Changes were scoped to be locally verifiable. In a codebase this size, a change whose blast radius you cannot see is a change you cannot ship on a cadence.',
     ],
     tech: ['Unity3D', 'C#', 'AppLovin', 'Firebase', 'GameAnalytics', 'Git'],
-    metrics: [{ value: '4', label: 'Platforms' }],
+    metrics: [{ value: '3', label: 'Platforms' }],
     links: [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=io.madhook.ameradventures' },
       { label: 'App Store', href: 'https://apps.apple.com/np/app/amer-the-chase-hit-and-run/id1638909330' },
       { label: 'PlayStation', href: 'https://store.playstation.com/en-us/concept/10018067' },
     ],
-    thumb: '/media/games/amer-chase.png',
+    thumb: '/media/games/amer-chase.webp',
   },
   {
     slug: 'amer-tycoon',
@@ -391,7 +391,7 @@ export const projects: Project[] = [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=io.madhook.karakboy' },
       { label: 'App Store', href: 'https://apps.apple.com/np/app/amer-tycoon-idle/id6738697763' },
     ],
-    thumb: '/media/games/amer-tycoon.png',
+    thumb: '/media/games/amer-tycoon.webp',
   },
   {
     slug: 'amer-cop-pursuit',
@@ -403,7 +403,7 @@ export const projects: Project[] = [
     status: 'Live',
     accent: 'blue',
     tags: ['Live-ops', 'Mobile', 'Console'],
-    platforms: ['iOS', 'Android', 'Steam', 'PS4'],
+    platforms: ['iOS', 'Android', 'Steam', 'PS4', 'PS5'],
     engine: 'Unity 3D',
     role: 'Unity developer',
     team: 'Mad Hook',
@@ -421,14 +421,14 @@ export const projects: Project[] = [
       'A shared codebase across four storefronts means a fix has four verification targets; keeping the platform differences at the edges is what makes that tractable.',
     ],
     tech: ['Unity3D', 'C#', 'AppLovin', 'Firebase', 'GameAnalytics', 'Git'],
-    metrics: [{ value: '4', label: 'Platforms' }],
+    metrics: [{ value: '5', label: 'Platforms' }],
     links: [
       { label: 'Steam', href: 'https://store.steampowered.com/app/1360820/The_Chase/' },
       { label: 'PlayStation', href: 'https://store.playstation.com/en-us/product/UP7305-PPSA18502_00-0141778171491961' },
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.madboxgames.thechase' },
       { label: 'App Store', href: 'https://apps.apple.com/np/app/amer-cop-pursuit/id1388971296' },
     ],
-    thumb: '/media/games/amer-cop-pursuit.png',
+    thumb: '/media/games/amer-cop-pursuit.webp',
   },
   {
     slug: 'rooftop-run',
@@ -464,10 +464,76 @@ export const projects: Project[] = [
       { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=io.madhook.parkour' },
       { label: 'App Store', href: 'https://apps.apple.com/np/app/rooftop-run/id1517567831' },
     ],
-    thumb: '/media/games/rooftop-run.png',
+    thumb: '/media/games/rooftop-run.webp',
   },
 
   /* ------------------------------------------------------------------ TOOLS */
+  {
+    slug: 'nav-mcp',
+    title: 'NAV MCP',
+    subtitle: 'One external server that lets AI tools work across every Unity Editor I have open.',
+    type: 'tool',
+    year: 2026,
+    period: '2026',
+    status: 'Shipped',
+    accent: 'yellow',
+    featured: true,
+    tags: ['Editor tool', 'MCP', 'AI tooling', 'Unity automation', 'Developer tools'],
+    platforms: ['Windows', 'macOS', 'Unity Editor'],
+    engine: '.NET 8 / Unity 6',
+    role: 'Solo systems and tool developer',
+    team: 'Solo',
+    blurb:
+      'Drives every open Unity Editor from one external MCP server: 92 operations behind six tools, a 910-token idle surface, main-thread batching, and mirrored scene reads.',
+    overview: [
+      'A flat Unity MCP catalog can charge an AI client for hundreds of tool schemas before it has done any work, while every live Editor call still has to wait for Unity\'s main thread. The server NAV MCP replaces exposed 356 tools at roughly 56,800 tokens and paid that context cost on every turn.',
+      'NAV MCP moves the durable state outside Unity into one .NET daemon, puts 92 Editor operations behind six MCP tools, and drives every linked Editor from the same desktop app. Guidance and schemas load only when needed; scene reads come from a live mirror; mutations batch into one Editor tick and one undo group.',
+    ],
+    contributions: [
+      'Built the daemon, Unity package, stdio bridge, and desktop app as one system.',
+      'Kept the MCP surface to six tools, then loaded the Unity commands and guidance only when the task needed them.',
+      'Made batches land in one Editor tick and one undo step, instead of making Unity wait for every call separately.',
+      'Maintained a live scene hierarchy from ObjectChangeEvents, cutting mirrored queries from about 95 ms to about 1 ms and keeping reads available through domain reloads.',
+      'Implemented loopback-only transports, per-start bearer tokens, readonly/standard/full modes, and per-tool permissions enforced by the daemon.',
+      'Generated dispatch, catalog, and reference docs from source attributes, backed by 153 tests and Windows/macOS CI packaging.',
+    ],
+    technical: [
+      'The request queue, retry logic, catalog, and scene mirror live in the daemon because Unity destroys its AppDomain on every script recompile. The Unity package connects out and only pumps operations on the main thread.',
+      'The selector grammar and reconcile hash compile into both the daemon and Unity package from shared source. Reconciliation can therefore identify the exact node and field that drifted without maintaining two parsers.',
+      'Health is the last completed round trip rather than socket state. A connected Editor blocked by a modal dialog is reported as blocked, including the dialog title, instead of being shown as healthy.',
+      'Each project is identified by a GUID rather than a port, and process command lines are read back after launch to verify that Unity received project paths containing spaces intact.',
+    ],
+    tech: ['C#', '.NET 8', 'ASP.NET Core', 'Avalonia', 'MCP', 'Unity Editor API', 'Roslyn', 'xUnit'],
+    metrics: [
+      { value: '56,800 → 910', label: 'Idle tool-schema tokens' },
+      { value: '~95 ms → ~1 ms', label: 'Scene query latency' },
+      { value: '32 → 1', label: 'Editor ticks per 32 operations' },
+      { value: '153', label: 'Automated tests' },
+    ],
+    thumb: '/media/tools/nav-mcp.webp',
+    gallery: [
+      {
+        caption: 'Overview: live server address, profile, tool count, and connected Editor state in one glance.',
+        src: '/media/tools/nav-mcp.webp',
+      },
+      {
+        caption: 'Projects: one daemon links, opens, restarts, and reports the live state of multiple Unity projects.',
+        src: '/media/tools/nav-mcp-projects.webp',
+      },
+      {
+        caption: 'Connections: safe setup for Claude Desktop, Claude Code, and Cursor without storing the bearer token in their config files.',
+        src: '/media/tools/nav-mcp-connections.webp',
+      },
+      {
+        caption: 'Settings: server mode plus searchable, per-operation permissions enforced immediately by the daemon.',
+        src: '/media/tools/nav-mcp-settings.webp',
+      },
+      {
+        caption: 'Stopped state: a first-run view that reports what is waiting and starts the server without a terminal.',
+        src: '/media/tools/nav-mcp-stopped.webp',
+      },
+    ],
+  },
   {
     slug: 'mesh-atlas-builder',
     title: 'Mesh Atlas Builder',
@@ -506,11 +572,11 @@ export const projects: Project[] = [
       { value: '8 → 1', label: 'SetPass calls' },
       { value: '−51%', label: 'CPU frame time' },
     ],
-    thumb: '/media/tools/mesh-atlas-builder.png',
+    thumb: '/media/tools/mesh-atlas-builder.webp',
     gallery: [
       {
         caption: 'The window after a pass over a twelve-part market stall: packing preview, occupancy, and the cost on either side.',
-        src: '/media/tools/mesh-atlas-builder.png',
+        src: '/media/tools/mesh-atlas-builder.webp',
       },
     ],
   },
@@ -552,17 +618,17 @@ export const projects: Project[] = [
       { value: '32 → 1', label: 'Unique materials' },
       { value: '5 → 1', label: 'Mesh assets' },
     ],
-    thumb: '/media/tools/gpu-instanced-painter.png',
+    thumb: '/media/tools/gpu-instanced-painter.webp',
     gallery: [
       {
         caption: 'Channel assignment, the four colourway swatches, and a strip of instances that all come off one mesh and one material.',
-        src: '/media/tools/gpu-instanced-painter.png',
+        src: '/media/tools/gpu-instanced-painter.webp',
       },
     ],
   },
   {
     slug: 'icon-generator',
-    title: 'Icon Generator',
+    title: 'Sprite Generator',
     subtitle: '3D asset to UI sprite, without a render scene',
     type: 'tool',
     year: 2025,
@@ -579,7 +645,7 @@ export const projects: Project[] = [
       'Frame a 3D asset, light it, outline it, and write the icon sprite, with no render scene to set up and no DCC round trip.',
     overview: [
       'Every shop, garage and inventory screen needs a flat icon of a thing that exists in 3D. The usual answer is a render scene somebody maintains, or a trip through a DCC package and back.',
-      'Icon Generator renders the asset live in an off-screen preview you can orbit, lights it with up to three placeable lights, dilates a coloured outline around the silhouette, and writes the supersampled sprite with its alpha.',
+      'Sprite Generator renders the asset live in an off-screen preview you can orbit, lights it with up to three placeable lights, dilates a coloured outline around the silhouette, and writes the supersampled sprite with its alpha.',
     ],
     contributions: [
       'Live preview with orbit, pan, and zoom, and an auto frame that fits the subject with space around it.',
@@ -597,11 +663,11 @@ export const projects: Project[] = [
       { value: '14 min → 36 s', label: 'Per icon' },
       { value: '3 → 1', label: 'Apps in the loop' },
     ],
-    thumb: '/media/tools/icon-generator.png',
+    thumb: '/media/tools/icon-generator.webp',
     gallery: [
       {
         caption: 'A shipped car framed for its shop icon: three preview lights, outline dilate on, checkerboard showing the cut-out.',
-        src: '/media/tools/icon-generator.png',
+        src: '/media/tools/icon-generator.webp',
       },
     ],
   },
@@ -642,11 +708,11 @@ export const projects: Project[] = [
       { value: '−53%', label: 'Shadow pass' },
       { value: '+2.7 MB', label: 'Texture memory' },
     ],
-    thumb: '/media/tools/shadow-baker.png',
+    thumb: '/media/tools/shadow-baker.webp',
     gallery: [
       {
         caption: 'Twenty static casters found, with the penumbra preview at the current softness.',
-        src: '/media/tools/shadow-baker.png',
+        src: '/media/tools/shadow-baker.webp',
       },
     ],
   },
@@ -687,11 +753,11 @@ export const projects: Project[] = [
       { value: '244 → 96 MB', label: 'Player build size' },
       { value: '−61%', label: 'Cold load time' },
     ],
-    thumb: '/media/tools/texture-optimizer.png',
+    thumb: '/media/tools/texture-optimizer.webp',
     gallery: [
       {
         caption: 'A real scan of this project. The two 8192 road maps at the top are 256 MB between them.',
-        src: '/media/tools/texture-optimizer.png',
+        src: '/media/tools/texture-optimizer.webp',
       },
     ],
   },
@@ -732,11 +798,11 @@ export const projects: Project[] = [
       { value: '340 → 137', label: 'Draw calls' },
       { value: '−59%', label: 'GPU frame time' },
     ],
-    thumb: '/media/tools/lod-baker.png',
+    thumb: '/media/tools/lod-baker.webp',
     gallery: [
       {
         caption: 'A 28,450-triangle prop down to a two-triangle impostor, with the distance ramp and the 12×12 capture grid.',
-        src: '/media/tools/lod-baker.png',
+        src: '/media/tools/lod-baker.webp',
       },
     ],
   },
@@ -776,11 +842,11 @@ export const projects: Project[] = [
       { value: '3 → 0', label: 'Build failures per week' },
       { value: '9 of 11', label: 'Findings fixed without a decision' },
     ],
-    thumb: '/media/tools/validator.png',
+    thumb: '/media/tools/validator.webp',
     gallery: [
       {
         caption: 'A pass over this project: three errors, five warnings, three notes. Nine of them fixable without a decision.',
-        src: '/media/tools/validator.png',
+        src: '/media/tools/validator.webp',
       },
     ],
   },
@@ -822,11 +888,11 @@ export const projects: Project[] = [
       { value: '190 → 74 min', label: 'Release wall time' },
       { value: '2 → 0', label: 'Build rejections per release' },
     ],
-    thumb: '/media/tools/build-pipeline.png',
+    thumb: '/media/tools/build-pipeline.webp',
     gallery: [
       {
         caption: 'A release going out to four targets at once, every storefront version scheme resolved from one number.',
-        src: '/media/tools/build-pipeline.png',
+        src: '/media/tools/build-pipeline.webp',
       },
     ],
   },

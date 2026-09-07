@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PageScreenRect } from '../three/campsite/Book'
+import { markProfileEvent } from '../lib/performanceProfile'
 import { useUnityHost } from './unityBuild'
+
+export { preloadUnityBuild } from './unityBuild'
 
 /* -------------------------------------------------------------------------- */
 /*  The build, growing out of the page it was printed on.                      */
@@ -27,6 +30,23 @@ export default function BookPlayer({
 
   const unity = useUnityHost(canvasRef, { title: 'Gameplay Demo', autoStart: true })
 
+  useEffect(() => {
+    markProfileEvent('mounted', { category: 'player' })
+    return () => markProfileEvent('unmounted', { category: 'player' })
+  }, [])
+
+  useEffect(() => {
+    markProfileEvent('transition-phase', { category: 'player', detail: phase })
+  }, [phase])
+
+  useEffect(() => {
+    markProfileEvent('status', {
+      category: 'unity',
+      detail: unity.error ? `${unity.status}: ${unity.error}` : unity.status,
+      severity: unity.status === 'error' ? 'critical' : 'info',
+    })
+  }, [unity.error, unity.status])
+
   // One frame on the page's own rectangle, then out to the full frame. Both
   // states have to be painted for the transition to have anything to
   // interpolate — mounting straight into the open state just snaps.
@@ -37,6 +57,7 @@ export default function BookPlayer({
 
   const close = () => {
     if (phase === 'closing') return
+    markProfileEvent('close-requested', { category: 'player' })
     setPhase('closing')
     // Long enough for the frame to land back on the page before the element
     // goes; matches the transition below.

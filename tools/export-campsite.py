@@ -16,6 +16,7 @@ does the resizing, WebP conversion and Draco pass afterwards.
 
 import bpy
 import bmesh
+import numpy as np
 import os
 import sys
 from mathutils import Matrix
@@ -65,6 +66,13 @@ KIT = [
                 "color": tex("Structures", "T_Tent_01_C.png"),
                 "normal": tex("Structures", "T_Tent_01_N.png"),
                 "rough": tex("Structures", "T_Tent_01_R.png"),
+            },
+            # Slot 2: the actual guy-line islands, widened and reassigned by
+            # thicken_tent_ropes after the FBX transforms have been applied.
+            {
+                "base_color": (0.34, 0.27, 0.18, 1.0),
+                "roughness_value": 0.96,
+                "double_sided": True,
             },
         ],
     },
@@ -378,6 +386,10 @@ def build_material(name, spec):
     links = mat.node_tree.links
     bsdf = nodes["Principled BSDF"]
     bsdf.inputs["Metallic"].default_value = 0.0
+    if spec.get("base_color"):
+        bsdf.inputs["Base Color"].default_value = spec["base_color"]
+    if spec.get("roughness_value") is not None:
+        bsdf.inputs["Roughness"].default_value = spec["roughness_value"]
 
     def add_tex(path, colorspace="sRGB", location=(-600, 0)):
         img = load_image(path)
@@ -399,7 +411,7 @@ def build_material(name, spec):
         node = add_tex(spec["rough"], "Non-Color", (-700, 0))
         if node:
             links.new(node.outputs["Color"], bsdf.inputs["Roughness"])
-    else:
+    elif spec.get("roughness_value") is None:
         bsdf.inputs["Roughness"].default_value = 0.85
 
     if spec.get("normal"):
@@ -433,6 +445,69 @@ def build_material(name, spec):
             pass
 
     return mat
+
+
+def thicken_tent_ropes(ob, slot_index, factor=1.75):
+    """Widen the FBX's real rope ribbons and move them onto their own slot.
+
+    LOD1 stores every guy line as a disconnected strip of exactly ten vertices
+    and five faces. PCA finds the strip's length/width axes regardless of which
+    side of the tent it runs down; scaling only the width axis preserves both
+    attachment points and the authored sag.
+    """
+    mesh = ob.data
+    adjacency = [set() for _ in mesh.vertices]
+    for edge in mesh.edges:
+        a, b = edge.vertices
+        adjacency[a].add(b)
+        adjacency[b].add(a)
+
+    unseen = set(range(len(mesh.vertices)))
+    components = []
+    while unseen:
+        root = unseen.pop()
+        stack = [root]
+        component = {root}
+        while stack:
+            current = stack.pop()
+            for neighbour in adjacency[current]:
+                if neighbour in unseen:
+                    unseen.remove(neighbour)
+                    component.add(neighbour)
+                    stack.append(neighbour)
+        components.append(component)
+
+    matched = 0
+    for component in components:
+        faces = [
+            poly
+            for poly in mesh.polygons
+            if poly.vertices and poly.vertices[0] in component
+        ]
+        if len(component) != 10 or len(faces) != 5:
+            continue
+
+        indices = sorted(component)
+        points = np.array([mesh.vertices[i].co[:] for i in indices], dtype=np.float64)
+        centre = points.mean(axis=0)
+        centred = points - centre
+        _, axes = np.linalg.eigh((centred.T @ centred) / len(points))
+        local = centred @ axes
+        if np.ptp(local[:, 2]) < 1.0:
+            continue
+
+        # Axis 2 is rope length, axis 1 the authored ribbon width, and axis 0
+        # its (near-zero) thickness. Only widen the visible ribbon.
+        local[:, 1] *= factor
+        widened = centre + local @ axes.T
+        for vertex_index, point in zip(indices, widened):
+            mesh.vertices[vertex_index].co = point
+        for poly in faces:
+            poly.material_index = slot_index
+        matched += 1
+
+    mesh.update()
+    print(f"  {ob.name}: widened and reassigned {matched} rope islands")
 
 
 def mark_faces_by_bbox(ob, bounds, slot_index):
@@ -535,6 +610,9 @@ def import_entry(entry):
         while len(ob.data.materials) < len(ob.material_slots):
             ob.data.materials.append(mats[-1])
 
+        if entry["name"] == "Tent":
+            thicken_tent_ropes(ob, 2)
+
         result.append(ob)
 
     # Recentre the whole entry as one unit. Doing this per object silently
@@ -606,4 +684,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

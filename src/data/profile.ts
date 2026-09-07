@@ -12,7 +12,7 @@ export const profile = {
     'I build responsive gameplay systems, polished cross-platform games, and Unity editor tools that help teams iterate faster.',
 
   summary: [
-    'I am a Unity gameplay & tools developer with ten shipped titles across iOS, Android, Steam, and PS4/PS5, including a mobile multiplayer driving game that I built and published solo to 100,000+ downloads and roughly 37,000 monthly active users.',
+    'I am a Unity gameplay & tools developer with ten shipped titles across iOS, Android, Steam, and PS4/PS5, including a mobile multiplayer driving game that I built and published solo to 200,000+ downloads and roughly 37,000 monthly active users.',
     'Whenever I take on a project, I take full ownership of the product and remain committed to bringing out its full potential from beginning to end.',
   ],
 
@@ -48,7 +48,7 @@ export const profile = {
   },
 
   stats: [
-    { value: '100K+', label: 'Solo game downloads', accent: 'red' as const },
+    { value: '200K+', label: 'Solo game downloads', accent: 'red' as const },
     { value: '10', label: 'Shipped titles', accent: 'blue' as const },
     { value: '4', label: 'Platforms shipped to', accent: 'yellow' as const },
     { value: '37K', label: 'Monthly active players', accent: 'ink' as const },
@@ -63,9 +63,9 @@ export const profile = {
       period: 'Aug 2024 to Aug 2026',
       place: 'Amman, Jordan',
       points: [
-        'Built and owned gameplay systems in Unity and C# across five cross-platform titles totalling 10M+ downloads, including Amer Tycoon: Idle (from scratch) and Highway Drifter: Hajwala Online (iOS, Android, Steam, PS4/PS5).',
+        'Wrote code in all seven studio titles and personally shipped 30+ updates to four live games without losing player progress, including Amer Tycoon: Idle (from scratch) and Highway Drifter: Hajwala Online (iOS, Android, Steam, PS4/PS5).',
         'Architected the core systems: a custom vehicle controller plus a heavily extended Realistic Car Controller Pro, kinematic and physics-based character controllers driven by finite state machines, a grid-based building and decoration system wired to progression and inventory, and a custom JSON save system.',
-        'Improved performance from 24 to 60 FPS on low-end Android devices, profiled with Unity Profiler and Frame Debugger.',
+        'Replaced the input controller across Highway Drifter: Hajwala Online with touch, keyboard, and gamepad schemes; retuned inherited car handling and owned draw-call optimization on the console builds.',
         'Wrote the Unity editor content tooling used by the 12-developer team: mesh and material combining with generated atlases, a vertex-colour combiner paired with a GPU-instanced recolouring shader, and 3D asset to UI sprite baking with no render scene.',
         'Automated the release and optimization path with LOD chains ending in impostors, shadow baking to ground sprites, folder-scoped texture import rules, a project validator, and a one-button multi-store build pipeline behind 40+ store releases.',
         'Increased Day-7 retention 26% relative and ad ARPDAU 10% through economy, progression and telemetry tuning; increased install conversion 13% relative with playable ads and capture scenes; mentored a junior Unity developer.',
@@ -78,9 +78,9 @@ export const profile = {
       place: 'Amman, Jordan',
       points: [
         'Founded Tazigra to publish my own games — Realistic Hajwala, Gravity Grid, Word Shift, and more on the way.',
-        'Designed, built and shipped a multiplayer driving game solo on iOS and Android in Unity with Photon PUN2, reaching 100,000+ downloads at roughly 80% organic, with 30,000 Android MAU and 7,000 iOS MAU.',
+        'Designed, built and shipped a multiplayer driving game solo on iOS and Android in Unity with eight-player Photon PUN2 multiplayer, reaching 200,000+ downloads at roughly 80% organic, with 30,000 Android MAU and 7,000 iOS MAU.',
         'Built the entire feature set alone: a heavily modified RCCP vehicle controller, custom JSON saves, dynamic day and night weather cycles, and a mobile-optimized traffic system.',
-        'Increased monthly ad revenue 86% in two months through mediation tuning, tracking 32.6% iOS Day-1 retention in Firebase and GameAnalytics.',
+        'Raised performance from 24 to 60 FPS on an iPhone 13 Pro in a full-traffic city and cut draw calls from 2,160 to 180; improved iOS Day-1 retention from about 20% to 38%.',
         'Prioritized the update roadmap from retention and monetization data, and ran the paid user acquisition behind it through Meta Ads Manager and Google Ads.',
       ],
     },
@@ -92,12 +92,12 @@ export const profile = {
       points: [
         'Shipped gameplay features and content updates for live mobile titles in Unity3D.',
         'Stabilized iOS and Android builds through release.',
-        'Trained 6 developers in C#, Unity UI architecture, animation state machines, and mobile optimization.',
+        'Trained six students and interns in C#, Unity UI architecture, animation state machines, and mobile optimization.',
       ],
     },
     {
       company: 'Aramad Information Technology',
-      role: 'Full-Stack Web Developer & IT Support',
+      role: 'Full-Stack Web Developer',
       period: 'Feb 2021 to Dec 2023',
       place: 'Charlottetown, PEI, Canada',
       points: [

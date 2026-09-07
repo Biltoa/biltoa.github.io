@@ -25,16 +25,11 @@ import * as THREE from 'three'
  * compile time, so a material compiled before the swap keeps the stock fog.
  */
 
-/** Metres above which the fog starts thinning. */
-const FOG_FLOOR = 0.2
-/** e-folding height of the falloff. Bigger = fog reaches higher. */
-const FOG_HEIGHT = 3.4
-/**
- * Fog left over at any altitude, so distance still sinks the canopies a little.
- * At 0 the far treetops sit in front of the sky at full contrast and the
- * treeline stops receding at all.
- */
-const FOG_CEILING = 0.24
+/** Bottom and top of the user's ground-fog band, in world metres. */
+const FOG_BOTTOM = -0.7
+const FOG_BOTTOM_FEATHER = 0.9
+const FOG_TOP = 4.8
+const FOG_TOP_FEATHER = 1.35
 /**
  * Nothing at all inside this range, ramping to full by FOG_FAR.
  *
@@ -141,9 +136,22 @@ export function installHeightFog() {
           float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
         #endif
 
-        // Altitude. Thick where it pools, thin at head height, a trace above.
-        float fogH = ${FOG_CEILING.toFixed(3)} + ${(1 - FOG_CEILING).toFixed(3)} *
-          exp( - max( vFogWorld.y - ${FOG_FLOOR.toFixed(3)}, 0.0 ) / ${FOG_HEIGHT.toFixed(3)} );
+        vec3 fogTarget = fogColor;
+
+        // A true ground-hugging band. It reaches zero before the leaves begin,
+        // with a broad feather instead of a horizontal shelf. The depth gate
+        // above still keeps the whole band behind the tents.
+        float fogBottom = smoothstep(
+          ${FOG_BOTTOM.toFixed(3)},
+          ${(FOG_BOTTOM + FOG_BOTTOM_FEATHER).toFixed(3)},
+          vFogWorld.y
+        );
+        float fogTop = 1.0 - smoothstep(
+          ${(FOG_TOP - FOG_TOP_FEATHER).toFixed(3)},
+          ${FOG_TOP.toFixed(3)},
+          vFogWorld.y
+        );
+        float fogH = fogBottom * fogTop;
 
         // Banks. A fog that is the same depth everywhere along the treeline reads
         // as a filter; two octaves of drift-free noise across the ground plane is
@@ -154,8 +162,10 @@ export function installHeightFog() {
           fogNoise( vFogWorld.xz * 0.085 ) * 0.32;
         fogH *= 0.62 + 0.72 * fogBank;
 
+        float fogAmount = clamp( fogFactor * fogH * fogGate, 0.0, 1.0 );
+
         gl_FragColor.rgb = mix(
-          gl_FragColor.rgb, fogColor, clamp( fogFactor * fogH * fogGate, 0.0, 1.0 )
+          gl_FragColor.rgb, fogTarget, fogAmount
         );
       }
     #endif

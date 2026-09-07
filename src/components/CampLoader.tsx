@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { profile } from '../data/profile'
 
 /* -------------------------------------------------------------------------- */
@@ -35,12 +35,40 @@ const BUDGET: Record<LoadStage, [number, number]> = {
 }
 
 /**
- * How long the curtain stays after the scene says it is ready.
- *
- * Long enough for the fade to play over a camp that is already rendering, so
- * the first thing the reader sees is a live frame rather than the first frame.
+ * Keep the curtain mounted just past its compositor-only opacity transition.
+ * GPU readiness is handled by the scene warmup, so this should never become a
+ * second, visible loading pause over the already-rendered campsite.
  */
-const FADE_MS = 620
+const FADE_MS = 260
+
+type EmberStyle = CSSProperties & Record<`--${string}`, string>
+
+/**
+ * Static DOM particles animated only with opacity and transforms.
+ *
+ * Chrome can advance these animations on its compositor even while WebGL is
+ * doing a synchronous driver call on the page thread. A canvas/rAF particle
+ * loop cannot: it freezes at exactly the moment the loader most needs to look
+ * alive. Values are seeded so the composition never jumps between visits.
+ */
+const LOADER_EMBERS: EmberStyle[] = (() => {
+  let seed = 0x8f31a2d7
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+    return seed / 4294967296
+  }
+
+  return Array.from({ length: 34 }, () => ({
+    '--ember-x': `${20 + random() * 60}%`,
+    '--ember-y': `${65 + random() * 20}%`,
+    '--ember-drift': `${(random() - 0.5) * 58}px`,
+    '--ember-rise': `${-(72 + random() * 96)}px`,
+    '--ember-size': `${0.9 + random() * 1.7}px`,
+    '--ember-duration': `${2.15 + random() * 2.45}s`,
+    '--ember-delay': `${-random() * 4.6}s`,
+    '--ember-glow': `${3.4 + random() * 2.8}px`,
+  }))
+})()
 
 export default function CampLoader({
   stage,
@@ -107,6 +135,11 @@ export default function CampLoader({
   return (
     <div className="camploader" data-done={stage === 'ready'} role="status" aria-live="polite">
       <div className="camploader__inner">
+        <span className="camploader__embers" aria-hidden="true">
+          {LOADER_EMBERS.map((style, index) => (
+            <i key={index} style={style} />
+          ))}
+        </span>
         {/* The same ember diamond and hairline the landing copy uses, so the
             curtain and what is behind it are visibly the same site. */}
         <div className="camploader__fire" aria-hidden="true">
