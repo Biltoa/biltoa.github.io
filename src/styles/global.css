@@ -2714,12 +2714,26 @@ html.is-loading body {
 }
 
 .bookplayer__controls .btn {
+  background: rgba(4, 7, 12, 0.78);
+  border-color: rgba(255, 255, 255, 0.72);
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.32),
+    0 4px 16px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(5px);
   transition:
     opacity 220ms var(--ease),
     color 220ms var(--ease),
     background-color 220ms var(--ease),
     border-color 220ms var(--ease),
     transform 220ms var(--ease);
+}
+
+.bookplayer__controls .btn:hover,
+.bookplayer__controls .btn:focus-visible {
+  background: rgba(4, 7, 12, 0.92);
+  border-color: #fff;
+  color: #fff;
 }
 
 .bookplayer__controls .btn:disabled {

@@ -129,7 +129,7 @@ export const profile = {
         'Unity',
         'Character & vehicle controllers',
         'Finite state machines',
-        'AI behaviour',
+        'NPC behaviour',
         'Grid-based building',
         'Inventory & progression',
         'JSON serialization',

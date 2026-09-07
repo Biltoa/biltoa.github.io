@@ -515,7 +515,7 @@ implementation.
 - `node tools/qa/click-tents.mjs` — all three tents open and reach their camera
   positions.
 - Fixed captures checked at 1280×720, 1774×887 and 2048×1024.
-- Final desktop capture: `tools/shots/codex-final-candidate.png`.
+- Final desktop capture: `tools/shots/final-candidate.png`.
 
 ---
 

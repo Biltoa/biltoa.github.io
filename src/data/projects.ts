@@ -471,14 +471,14 @@ export const projects: Project[] = [
   {
     slug: 'nav-mcp',
     title: 'NAV MCP',
-    subtitle: 'One external server that lets AI tools work across every Unity Editor I have open.',
+    subtitle: 'One external server that connects automation clients to every Unity Editor I have open.',
     type: 'tool',
     year: 2026,
     period: '2026',
     status: 'Shipped',
     accent: 'yellow',
     featured: true,
-    tags: ['Editor tool', 'MCP', 'AI tooling', 'Unity automation', 'Developer tools'],
+    tags: ['Editor tool', 'MCP', 'Automation tooling', 'Unity automation', 'Developer tools'],
     platforms: ['Windows', 'macOS', 'Unity Editor'],
     engine: '.NET 8 / Unity 6',
     role: 'Solo systems and tool developer',
@@ -486,7 +486,7 @@ export const projects: Project[] = [
     blurb:
       'Drives every open Unity Editor from one external MCP server: 92 operations behind six tools, a 910-token idle surface, main-thread batching, and mirrored scene reads.',
     overview: [
-      'A flat Unity MCP catalog can charge an AI client for hundreds of tool schemas before it has done any work, while every live Editor call still has to wait for Unity\'s main thread. The server NAV MCP replaces exposed 356 tools at roughly 56,800 tokens and paid that context cost on every turn.',
+      'A flat Unity MCP catalog can charge an automation client for hundreds of tool schemas before it has done any work, while every live Editor call still has to wait for Unity\'s main thread. The server NAV MCP replaces exposed 356 tools at roughly 56,800 tokens and paid that context cost on every turn.',
       'NAV MCP moves the durable state outside Unity into one .NET daemon, puts 92 Editor operations behind six MCP tools, and drives every linked Editor from the same desktop app. Guidance and schemas load only when needed; scene reads come from a live mirror; mutations batch into one Editor tick and one undo group.',
     ],
     contributions: [
@@ -521,7 +521,7 @@ export const projects: Project[] = [
         src: '/media/tools/nav-mcp-projects.webp',
       },
       {
-        caption: 'Connections: safe setup for Claude Desktop, Claude Code, and Cursor without storing the bearer token in their config files.',
+        caption: 'Connections: safe setup for desktop and editor clients without storing the bearer token in their config files.',
         src: '/media/tools/nav-mcp-connections.webp',
       },
       {

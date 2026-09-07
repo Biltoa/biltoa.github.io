@@ -28,7 +28,7 @@ TEXT_X = 49.05
 BULLET_X = 38.30
 
 LINES = [
-    "Built NAV MCP, an external .NET 8 server and desktop app that lets AI tools control multiple Unity Editors through 92",
+    "Built NAV MCP, an external .NET 8 server and desktop app that controls multiple Unity Editors through 92",
     "operations exposed as six MCP tools, cutting idle tool-schema context from 56,800 to 910 tokens; added one-tick",
     "batching, ~1 ms scene reads, permissions, and 153 automated tests.",
 ]

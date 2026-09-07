@@ -1,11 +1,16 @@
+import argparse
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 
-SOURCE = Path(r"C:\Users\bilto\AppData\Local\Temp\codex-clipboard-0bea0101-9359-4714-9a28-c2bc60b96f79.png")
-OUTPUT = Path(r"E:\Portfolio Project\public\textures\tent-cloth\canvas-reference.webp")
+parser = argparse.ArgumentParser(description="Build the tent fabric preview texture.")
+parser.add_argument("source", type=Path, help="Path to the source canvas photograph")
+args = parser.parse_args()
+
+SOURCE = args.source
+OUTPUT = Path(__file__).resolve().parents[1] / "public/textures/tent-cloth/canvas-reference.webp"
 
 # Turn the supplied white canvas photograph into a neutral scalar weave map.
 # Percentile normalization preserves its real vertical thread structure without

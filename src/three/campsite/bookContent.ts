@@ -98,7 +98,7 @@ const CORE_SKILLS = profile.skills
 const SKILL_LINES: Record<string, string[]> = {
   'Gameplay Programming': [
     'C# · Unity · Character & vehicle controllers',
-    'Finite state machines · AI behaviour',
+    'Finite state machines · NPC behaviour',
     'Grid-based building · Inventory & progression',
     'JSON serialization',
   ],
