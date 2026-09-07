@@ -10,8 +10,8 @@ import { projects, type Project } from './projects'
  * needs and the HTML pages do not: how deep each chapter runs, a tagline short
  * enough for a page of paper, and for the tools, the before-and-after bars.
  *
- * Store artwork under /media/games is fetched by `tools/fetch-game-art.mjs`;
- * the tool screenshots under /media/tools by `tools/shoot-unity-tools.mjs`.
+ * Store artwork lives under /media/games and tool screenshots under
+ * /media/tools.
  */
 
 export interface BookLink {
@@ -242,7 +242,7 @@ export const bookTools: BookTool[] = projects
       // Three is what fits above the rule; the site page carries the rest.
       what: p.contributions.slice(0, 3),
       how: extra.how,
-      // The lifted, tighter crop — see tools/shoot-unity-tools.mjs.
+      // The journal uses a lifted, tighter crop of the tool screenshot.
       shot: `/media/tools/${p.slug}-book.webp`,
       shotCaption: extra.shotCaption,
       deltas: extra.deltas,

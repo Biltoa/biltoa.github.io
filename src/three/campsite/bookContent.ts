@@ -216,8 +216,8 @@ const ABOUT: Spread[] = [
 /*  The gameplay journal.                                                      */
 /*                                                                             */
 /*  About the build that is sitting one click away, not about WebGL in the      */
-/*  abstract. The pictures are frames off that same build running in a browser  */
-/*  (tools/shoot-build.mjs), and the control list is the one the build itself    */
+/*  abstract. The pictures are frames off that same build running in a browser, */
+/*  and the control list is the one the build itself                             */
 /*  prints on its opening card — which is not the one this chapter used to      */
 /*  claim.                                                                     */
 /* ------------------------------------------------------------------------- */

@@ -540,8 +540,8 @@ function readFov(aspect: number, open: number) {
  * simply moves the book up the frame. Both gaps scale with frame height, so
  * the balance holds at any aspect.
  *
- * Calibrated on the About tent with tools/qa/measure.cjs. At -0.088 the shut
- * book sits at about 104 above / 91 below and the open spread at 122 / 123;
+ * At -0.088 the shut book sits at about 104 above / 91 below and the open
+ * spread at 122 / 123;
  * the two states cannot be perfect at once because the spread is shallower
  * than the board, so this splits them.
  */

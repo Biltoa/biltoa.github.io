@@ -44,10 +44,8 @@ const upgradedKitScenes = new WeakSet<THREE.Object3D>()
 /**
  * Loader + helpers for the campsite kit.
  *
- * The GLB is built by tools/export-campsite.py from the Dreamscape Campsite
- * Unity pack, patched by tools/fix-alpha.mjs, then cut down to what the scene
- * actually places by tools/strip-kit.mjs. Anything added to the scene has to be
- * added to that script's keep list too, or the export will not contain it.
+ * The shipped GLB contains the optimized subset of the Dreamscape Campsite
+ * Unity pack used by this scene.
  *
  * Node names in the shipped kit:
  *   Tent, TreeA, TreeB, TreeC, GrassA, GrassB, Flowers_0, Flowers_1,
@@ -183,9 +181,8 @@ export function useKit() {
     // material instance an earlier call had already handed to a `Part` and
     // (for direct, un-cloned uses like Bench/Stone) already attached to a
     // mesh mid-frame — freshly-live materials thrown away and recompiled
-    // five-plus times over on every load. Reproduced as a hang: headless
-    // `tools/shot.mjs` timed out waiting for a stable frame twice in a row
-    // with this un-guarded, while the always-warm interactive dev tab
+    // five-plus times over on every load. This reproduced as a first-mount hang
+    // while an already-warm interactive development tab
     // (already past that first commit before the bug was introduced)
     // never showed it — the tell that it was a first-mount-only problem.
     if (!upgradedKitScenes.has(gltf.scene)) {
@@ -240,8 +237,8 @@ export function useKit() {
     }
 
     // Foliage reads as cardboard without two-sided rendering, and the pack
-    // authors its leaves as single-sided cards. Alpha cutout itself is set in
-    // the GLB by tools/fix-alpha.mjs.
+    // authors its leaves as single-sided cards. Alpha cutout is stored in the
+    // shipped GLB.
     //
     // **Cards only.** This used to run over every primitive of a tree, which
     // includes the trunk — and a trunk is a closed solid, so two-sided is not a

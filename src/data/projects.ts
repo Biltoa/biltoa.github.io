@@ -6,9 +6,7 @@
  * measured number behind them — a project with nothing to report carries scope
  * facts (platforms, frame target) instead of an invented percentage.
  *
- * Media:
- *   thumb:   store artwork, pulled by `tools/fetch-game-art.mjs`
- *   gallery: tool window captures, produced by `tools/shoot-unity-tools.mjs`
+ * Media paths point to the final optimized assets under `public/media`.
  */
 
 export type ProjectType = 'game' | 'tool'

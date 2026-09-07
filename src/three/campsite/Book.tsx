@@ -993,8 +993,8 @@ export default function Book({
 
   useLayoutEffect(() => {
     // Dev-only: the folio is painted into the page texture, so which leaf the
-    // journal is open at is invisible from outside the canvas. The end-to-end
-    // probe in tools/probe-book.mjs reads this.
+    // journal is open at is invisible from outside the canvas. The development
+    // handle below exposes it for end-to-end checks.
     if (import.meta.env.DEV) {
       // Only the journal the camera is at may claim the single-value handle —
       // all three are mounted the whole time, so an unguarded write is three
@@ -1741,7 +1741,7 @@ export default function Book({
 
     // Dev-only: the three journals are supposed to be the same object in the
     // same place in three tents, and a framing difference between them is only
-    // separable from a camera difference by reading both. See tools/qa/cam.mjs.
+    // separable from a camera difference by reading both values.
     if (import.meta.env.DEV && shift.current) {
       const w = window as unknown as {
         __books?: unknown[]
