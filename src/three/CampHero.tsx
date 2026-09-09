@@ -21,14 +21,16 @@ import {
 import { KernelSize, ToneMappingMode, type OutlineEffect } from 'postprocessing'
 import * as THREE from 'three'
 import { clamp01, damp, easeInOutCubic, scrollDriver } from '../lib/scroll'
-import { GRAPHICS_DPR } from '../lib/graphics'
-import { sfxEnter, sfxExit, sfxHover, sfxUiClick, sfxUiHover, tickAudio } from '../lib/audio'
+import { GRAPHICS_DPR, MOBILE_EXPERIENCE } from '../lib/graphics'
+import { sfxEnter, sfxExit, sfxHover, sfxUiHover, tickAudio } from '../lib/audio'
 import {
   ALL_STANDARD_MATERIALS,
+  BARK_MATERIALS,
   collectParts,
   TENT_MATERIALS,
   tintParts,
   useKit,
+  KIT_URL,
 } from './campsite/useKit'
 import {
   applyGroundGlow,
@@ -42,8 +44,9 @@ import { applyParallax } from './campsite/parallax'
 import { installHeightFog } from './campsite/fog'
 import { fireFlicker } from './campsite/fire'
 import { SplitToneEffect } from './campsite/grade'
-import Book, { type PageScreenRect } from './campsite/Book'
-import { loadBookFonts, waitForBookImages } from './campsite/bookPaint'
+import Book, { type PageScreenRect, type PageSide } from './campsite/Book'
+import { loadBookFonts, waitForBookImages, releaseBookImages } from './campsite/bookPaint'
+import { markProfileEvent } from '../lib/performanceProfile'
 import {
   Campfire,
   FIRELIGHT,
@@ -61,7 +64,11 @@ import {
 } from './campsite/Effects'
 import { debugEnabled, mountDebugPanel } from './campsite/debugPanel'
 import { attachDebugGain, GRASS_GAIN } from './campsite/debugGain'
-import { LANTERN_CANDLE_TOP_DROP, useBenchSetup } from './campsite/useBenchSetups'
+import {
+  BENCH_SETUPS_URL,
+  LANTERN_CANDLE_TOP_DROP,
+  useBenchSetup,
+} from './campsite/useBenchSetups'
 
 /* -------------------------------------------------------------------------- */
 /*  Night lighting, in one place.                                               */
@@ -291,6 +298,55 @@ const TENT_CANVAS = {
 } as const
 useTexture.preload(TENT_CLOTH)
 
+/**
+ * Drops loader-cache references after the mobile campsite canvas unmounts.
+ * R3F disposes the live GPU objects; clearing these entries lets WebKit reclaim
+ * their decoded images and ArrayBuffers before the Unity player allocates.
+ */
+let mobileCampState: RootState | null = null
+
+/** Retire the renderer while its scene still contains the owned resources. */
+export function retireMobileCampRenderer() {
+  if (!MOBILE_EXPERIENCE || !mobileCampState) return
+  const state = mobileCampState
+  mobileCampState = null
+  state.setFrameloop('never')
+  const textures = new Set<THREE.Texture>()
+  const materials = new Set<THREE.Material>()
+  const geometries = new Set<THREE.BufferGeometry>()
+  state.scene.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (mesh.geometry) geometries.add(mesh.geometry)
+    for (const material of Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []) {
+      materials.add(material)
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value)
+      }
+    }
+  })
+  for (const texture of textures) texture.dispose()
+  for (const material of materials) material.dispose()
+  for (const geometry of geometries) geometry.dispose()
+  state.gl.forceContextLoss()
+  state.gl.dispose()
+  markProfileEvent('camp-context-retired', { category: 'camp', detail: `${textures.size} textures, ${geometries.size} geometries; lost=${state.gl.getContext().isContextLost()}` })
+}
+
+export function releaseCampAssetCaches() {
+  useGLTF.clear(CABIN_BLUE_URL)
+  useGLTF.clear(KIT_URL)
+  useGLTF.clear(BENCH_SETUPS_URL)
+  useTexture.clear(TENT_CLOTH)
+  useTexture.clear(TENT_LEATHER_GRAIN)
+  THREE.Cache.clear()
+  if (MOBILE_EXPERIENCE) {
+    releaseBookImages()
+    ALL_STANDARD_MATERIALS.length = 0
+    BARK_MATERIALS.length = 0
+    TENT_MATERIALS.length = 0
+  }
+}
+
 const BACK = (TENT.rawDepth * TENT.scale) / 2
 const HALF_W = (TENT.rawWidth * TENT.scale) / 2
 const TOP = TENT.rawHeight * TENT.scale
@@ -327,12 +383,23 @@ const TREE_AUDIT_PAN =
   reads it — three differently sized spreads for the sake of a few centimetres
   of silhouette is the wrong trade. See DECISIONS in VISUAL_CHANGES.md.
 */
-const TENTS = [
-  { x: CAMP_X - 8.2, z: -5.05, yaw: 0.53 },
-  // Exactly square to the lobby camera when the pointer is centred.
-  { x: CAMP_X, z: -8.15, yaw: 0 },
-  { x: CAMP_X + 8.2, z: -5.85, yaw: -0.4 },
-]
+const TENTS = MOBILE_EXPERIENCE
+  ? [
+      // The phone composition is deliberately tighter than desktop. Combined
+      // with the normal (non-anamorphic) camera below, the outer canvas corners
+      // meet the viewport edges without making the tents look tall and thin.
+      // Every approach, interior and book pose is derived from this table, so
+      // interaction remains aligned with the visible mobile-only placement.
+      { x: CAMP_X - 3.9, z: -3.35, yaw: 0.47 },
+      { x: CAMP_X, z: -5.9, yaw: 0 },
+      { x: CAMP_X + 3.9, z: -3.8, yaw: -0.38 },
+    ]
+  : [
+      { x: CAMP_X - 8.2, z: -5.05, yaw: 0.53 },
+      // Exactly square to the lobby camera when the pointer is centred.
+      { x: CAMP_X, z: -8.15, yaw: 0 },
+      { x: CAMP_X + 8.2, z: -5.85, yaw: -0.4 },
+    ]
 const MOON_KEY_NAME = 'camp-moon-key'
 
 /** Aim the existing moon shadow camera without changing the light itself. */
@@ -431,7 +498,15 @@ const FROZEN_HOT = frozen('hot')
 const PROFILE_SHADOWS = frozen('shadows') !== 0
 const PROFILE_FIREFLIES = frozen('fireflies') !== 0
 const PROFILE_LEAVES = frozen('leaves') !== 0
-const FIRE_POS: [number, number, number] = [CAMP_X, 0, 1.2]
+// A tall phone needs more foreground separation than desktop. Pull the entire
+// fire circle toward the mobile lobby camera — fire, bench ring, worn earth,
+// contact shadows, warm-light mask and path origins all derive from this one
+// point — while the tent transforms remain untouched.
+const FIRE_POS: [number, number, number] = [
+  CAMP_X,
+  0,
+  MOBILE_EXPERIENCE ? 4.2 : 1.2,
+]
 
 /**
  * The low bench the journal lies open on, in the tent's own frame.
@@ -1135,20 +1210,25 @@ function Ground() {
     })
     applyGroundGlow(m, {
       desaturateMap: 0.28,
-      mapTint: new THREE.Color('#574638'),
+      mapTint: new THREE.Color(MOBILE_EXPERIENCE ? '#38483b' : '#574638'),
       // Same rust-orange the blades stand in, so the pool under everyone's
       // feet reads as one fire rather than the ground and the grass disagreeing
       // on what colour it is.
       warmColor: new THREE.Color('#e88d48'),
-      warmGain: 0.1,
+      warmGain: MOBILE_EXPERIENCE ? 0.14 : 0.1,
       // The far field's only light once it is out of the fire's reach: the
       // same teal-to-magenta ramp the canopies bounce, flat rather than
       // height-weighted because the ground has no crown to bias toward.
-      aurora: { low: AURORA_BOUNCE_LOW, mid: AURORA_BOUNCE_MID, high: AURORA_BOUNCE_HIGH, gain: 0.034 },
+      aurora: {
+        low: AURORA_BOUNCE_LOW,
+        mid: AURORA_BOUNCE_MID,
+        high: AURORA_BOUNCE_HIGH,
+        gain: MOBILE_EXPERIENCE ? 0.052 : 0.034,
+      },
       // A small constant lift so the plane past both of those never actually
       // hits (0,0,0) — see NIGHT.ambient for why the scene-wide version of
       // this stays just as small.
-      floor: new THREE.Color('#3a332d'),
+      floor: new THREE.Color(MOBILE_EXPERIENCE ? '#26372f' : '#3a332d'),
     })
     // LIGHTING-REWORK (2026-08-17): shares GRASS_GAIN with the blade
     // materials in useKit.ts, so the ?debug panel's "Grass" slider moves the
@@ -1464,12 +1544,20 @@ function Scatter() {
      * @param rMax  outer radius
      * @param bias  1 spreads evenly over the annulus, >1 crowds the inner edge
      */
-    const sowGrass = (count: number, rMin: number, rMax: number, bias: number, scale: number) => {
+    const sowGrass = (
+      count: number,
+      rMin: number,
+      rMax: number,
+      bias: number,
+      scale: number,
+      foregroundZ = Number.NEGATIVE_INFINITY
+    ) => {
       for (let i = 0; i < count; i++) {
         const a = r() * Math.PI * 2
         const rad = rMin + Math.pow(r(), bias) * (rMax - rMin)
         const x = FIRE_POS[0] + Math.cos(a) * rad
         const z = FIRE_POS[2] + Math.sin(a) * rad
+        if (z < foregroundZ) continue
         // Nothing behind the lens.
         //
         // This used to cut a 4.8m-wide corridor out of everything past z = 4.5,
@@ -1488,8 +1576,10 @@ function Scatter() {
         // actual bug; grass now comes in closer to the lens (still with a
         // ~0.8m clearance so blades don't poke through the near clip at
         // any aspect) rather than the bare plane showing at all.
-        if (z > 13.2) continue
-        if (z > 12.2 && Math.abs(x - CAMP_X) < 1.7) continue
+        const nearLimit = MOBILE_EXPERIENCE ? 18.35 : 13.2
+        const centreLimit = MOBILE_EXPERIENCE ? 17.65 : 12.2
+        if (z > nearLimit) continue
+        if (z > centreLimit && Math.abs(x - CAMP_X) < 1.7) continue
         const dFire = Math.hypot(x - FIRE_POS[0], z - FIRE_POS[2])
         // Overlaps the paving slightly on purpose: tufts closing over the outer
         // setts are what tie the walkway into the clearing, and matching the two
@@ -1534,6 +1624,11 @@ function Scatter() {
     // density as ground thirty metres away, which at this camera height is
     // nowhere near enough to close over.
     sowGrass(1650, 4.2, 11.5, 1.15, 1.16)
+    // Portrait exposes the final metres between the normal near apron and the
+    // camera. Fill that mobile-only strip densely enough that the base plane
+    // cannot show through as a triangular missing-grass patch, while retaining
+    // a short clearance at the lens so alpha cards never cross the near clip.
+    if (MOBILE_EXPERIENCE) sowGrass(850, 10.2, 18.1, 1.2, 1.2, 11.2)
 
     /*
       Flowers, in loose clumps rather than an even sprinkle.
@@ -1915,8 +2010,8 @@ function TentInterior({
   useFrame((state) => {
     const flick = fireFlicker(state.clock.elapsedTime * 0.8 + index)
     const k = lit ? gain.current : 0
-    if (floorBounce.current) floorBounce.current.opacity = 0.105 * flick * k
-    if (wallBounce.current) wallBounce.current.opacity = 0.065 * flick * k
+    if (floorBounce.current) floorBounce.current.opacity = 0.16 * flick * k
+    if (wallBounce.current) wallBounce.current.opacity = 0.1 * flick * k
   })
 
   return (
@@ -1952,7 +2047,7 @@ function TentInterior({
               position={flame}
               color="#ff9d52"
               intensity={0}
-              distance={1.35}
+              distance={2.25}
               decay={2}
             />
             {/*
@@ -2081,6 +2176,8 @@ function Tent({
   onHover,
   onNavigate,
   onZoom,
+  pageZoom,
+  onPageZoom,
   onBookOpenRequest,
   bookHovered,
   onBookHover,
@@ -2109,6 +2206,8 @@ function Tent({
   onHover: (i: TentIndex | null, source: 'tent' | 'label') => void
   onNavigate: (to: string, from?: PageScreenRect) => void
   onZoom?: (src: string, from: PageScreenRect) => void
+  pageZoom: PageSide | null
+  onPageZoom: (side: PageSide | null) => void
   /** Fired when the reader clicks this tent's closed journal. */
   onBookOpenRequest: () => void
   bookHovered: boolean
@@ -2844,10 +2943,10 @@ void main() {`
     // opened. Page readability is owned by the high, even reading source and
     // the page materials, so the book never appears to switch the lantern off.
     if (lantern.current) {
-      lantern.current.intensity = 0.72 * flick * k
+      lantern.current.intensity = 1.35 * flick * k
     }
-    if (lanternSpill.current) lanternSpill.current.intensity = 3.2 * flick * k
-    if (readLight.current) readLight.current.intensity = 0.6 * k
+    if (lanternSpill.current) lanternSpill.current.intensity = 4.4 * flick * k
+    if (readLight.current) readLight.current.intensity = 0.45 * k
     if (glowLight.current) {
       // A localized lamp at the entrance, not tent-wide transmission. It keeps
       // the open doorway warm while the exterior canvas remains moon-lit PBR.
@@ -2877,7 +2976,6 @@ void main() {`
           onClick={(e) => {
             e.stopPropagation()
             if (entered === null) {
-              sfxUiClick()
               onEnter(index as TentIndex)
             }
           }}
@@ -2929,12 +3027,12 @@ void main() {`
       />
 
       {/*
-        The journal, mounted in all three tents from the first frame, built
-        during the loading screen, and visible on the bench the whole time —
-        it's a thing sitting there, not something that appears when you walk
-        in. It stays *shut*, though: `enabled` (below) keeps it closed and
-        un-lit until its own room lights, so what's visible from the clearing
-        is a closed book, not one already open and readable.
+        Desktop journals are mounted in all three tents from the first frame,
+        built during the loading screen, and visible on the bench the whole
+        time. Mobile prewarms those same states behind the loader, but keeps
+        only the occupied tent's journal resident and releases it once the
+        walk out finishes; holding its large canvas textures in the lobby made
+        the next tent briefly own two journals during React's handoff.
 
         `here`, not always-on: from inside a *different* tent's reading pose
         the camera looks out over that tent's low walls into the open camp,
@@ -2952,7 +3050,10 @@ void main() {`
         had never existed in the frame before. Paying the 78MB and the compile
         cost up front, on the loading screen, is the trade being made instead.
       */}
-      <group visible={here}>
+      {/* Mobile releases only the occupied journal. Once the exit reaches the
+          lobby, unmount it so its large canvas textures are freed well before
+          another tent can be selected. Desktop keeps its prebuilt journals. */}
+      {(!MOBILE_EXPERIENCE || (active && roomLit)) && <group visible={here}>
         <Book
           index={index}
           width={BOOK_WIDTH}
@@ -2966,13 +3067,15 @@ void main() {`
           live={entering}
           onNavigate={onNavigate}
           onZoom={onZoom}
+          pageZoom={pageZoom}
+          onPageZoom={onPageZoom}
           onOpenRequest={onBookOpenRequest}
           closedHot={bookHovered}
           onClosedHover={onBookHover}
           registerOutlineTarget={registerBookOutlineTarget}
           onClose={onClose}
         />
-      </group>
+      </group>}
 
       {/* Torches flanking the entrance. */}
       <Torch position={[-HALF_W * 0.72, 0, BACK + 0.35]} seed={index * 2.3} lit={here} />
@@ -2998,15 +3101,26 @@ function TentSign({
   entered: number | null
 }) {
   const sign = tentFrame(index).sign
+  // The middle tent sits farther from the lobby camera. Equal world-space
+  // signs therefore projected lower and smaller on a phone even though their
+  // CSS was identical. These tiny mobile-only perspective corrections make
+  // the three labels share one visual baseline and apparent type size.
+  const mobileY = index === 1 ? 0.13 : 0
+  const mobileDistanceFactor = index === 1 ? 13.8 : index === 2 ? 13.15 : 13
+  const mobileX = index === 2 ? -0.18 : 0
 
   return (
     <Html
       center
-      distanceFactor={13}
+      distanceFactor={MOBILE_EXPERIENCE ? mobileDistanceFactor : 13}
       // Removing the tall bead column already lowers the centred label/arrow
       // block on screen. Keep only a small additional drop while leaving clear
       // air between the chevron and the crossed poles.
-      position={[sign.x, TOP + 0.77, sign.z]}
+      position={[
+        sign.x + (MOBILE_EXPERIENCE ? mobileX : 0),
+        TOP + 0.77 + (MOBILE_EXPERIENCE ? mobileY : 0),
+        sign.z,
+      ]}
       style={{ pointerEvents: entered === null ? 'auto' : 'none', userSelect: 'none' }}
       zIndexRange={[8, 0]}
     >
@@ -3022,7 +3136,6 @@ function TentSign({
         onPointerLeave={() => onHover(null, 'label')}
         onClick={() => {
           if (entered !== null) return
-          sfxUiClick()
           onEnter(index as TentIndex)
         }}
       >
@@ -3072,11 +3185,13 @@ interface RigState {
 function CameraRig({
   state,
   bookOpen,
+  pageZoom,
   focusRef,
   onFocus,
 }: {
   state: React.RefObject<RigState>
   bookOpen: React.RefObject<number>
+  pageZoom: PageSide | null
   focusRef: React.RefObject<number>
   onFocus: (i: TentIndex) => void
 }) {
@@ -3091,6 +3206,8 @@ function CameraRig({
   const smoothPointer = useMemo(() => new THREE.Vector2(), [])
   const reported = useRef<TentIndex>(1)
   const warmed = useRef(false)
+  const pageZoomAmount = useRef(0)
+  const pageZoomDirection = useRef(1)
 
   useFrame((frameState, delta) => {
     const st = state.current
@@ -3115,19 +3232,27 @@ function CameraRig({
     const frame = tentFrame(idx)
 
     const aspect = Math.max(0.4, size.width / size.height)
+    const mobilePortrait = MOBILE_EXPERIENCE && aspect < 0.8
     const wide = aspect >= 1.15
     // No sideways drift on a landscape viewport: all three tents already fit,
     // so the only thing the drift did was sit the lobby pose off to one side
     // of the fire, which reads as a mis-aimed camera rather than as parallax.
     // Narrow viewports keep it, because there the camera genuinely has to pan
     // to reach the outer tents.
-    const drift = wide ? 0 : 7.6
+    const drift = wide || mobilePortrait ? 0 : 7.6
     const lobbyX = (focusRef.current - 1) * drift
-    const lobbyZ = THREE.MathUtils.clamp(
-      9.4 / (Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * aspect),
-      8.5,
-      19
-    )
+    // Portrait uses the real canvas aspect. The previous artificial 1.3x
+    // projection squeezed the scene horizontally and made every tent look
+    // vertically stretched. Their mobile-only world placement now does the
+    // framing, so geometry keeps its intended proportions.
+    const lobbyFov = mobilePortrait ? 50 : 42
+    const lobbyZ = mobilePortrait
+      ? 19.2
+      : THREE.MathUtils.clamp(
+          9.4 / (Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * aspect),
+          8.5,
+          19
+        )
 
     // Damped pointer. The raw value jumps when the cursor re-enters the window
     // or when a drei Html element swallows a move, which was the source of the
@@ -3139,7 +3264,18 @@ function CameraRig({
     smoothPointer.y += THREE.MathUtils.clamp(py - smoothPointer.y, -slew, slew)
 
     const t = easeInOutCubic(clamp01(st.travel))
-    let fov = 42
+    const projectionAspect = aspect
+    const aspectChanged = Math.abs(cam.aspect - projectionAspect) > 0.001
+    if (aspectChanged) cam.aspect = projectionAspect
+    let fov = lobbyFov
+
+    const zoomReady = MOBILE_EXPERIENCE && st.entered !== null && st.travel > 0.96 && bookOpen.current > 0.72
+    const zoomTarget = zoomReady && pageZoom !== null ? 1 : 0
+    pageZoomAmount.current += (zoomTarget - pageZoomAmount.current) * damp(7.2, dt)
+    if (pageZoom !== null) {
+      const direction = pageZoom === 'left' ? -1 : 1
+      pageZoomDirection.current += (direction - pageZoomDirection.current) * damp(9, dt)
+    }
 
     if (t < 0.42) {
       const k = clamp01(t / 0.42)
@@ -3153,7 +3289,11 @@ function CameraRig({
         // eye height and *then* crouching meant the descent had to happen
         // inside the last metre, which the damped follow could not keep up
         // with — see the duck below.
-        THREE.MathUtils.lerp(EYE + 1.08 - smoothPointer.y * 0.35, 0.9, k),
+        THREE.MathUtils.lerp(
+          (mobilePortrait ? EYE + 0.72 : EYE + 1.08) - smoothPointer.y * 0.35,
+          0.9,
+          k
+        ),
         THREE.MathUtils.lerp(lobbyZ, frame.approach.z, k)
       )
       look.set(
@@ -3161,10 +3301,14 @@ function CameraRig({
         // And already aimed low. Looking at the middle of the tent puts the
         // canvas above the door across the top of the frame for the whole
         // approach, which is the first half of "it hits the door frame".
-        THREE.MathUtils.lerp(EYE - 0.76, 0.62, k),
+        // The former portrait aim looked several metres above the tents. On a
+        // tall phone that put the camp in the bottom third of the screen. Aim
+        // slightly down, as the desktop rig already does, so the tent bodies
+        // occupy the vertical middle while retaining sky above and grass below.
+        THREE.MathUtils.lerp(mobilePortrait ? EYE - 0.55 : EYE - 0.76, 0.62, k),
         THREE.MathUtils.lerp(tent.z + 1.5, frame.origin.z, k)
       )
-      fov = THREE.MathUtils.lerp(42, 44, k)
+      fov = THREE.MathUtils.lerp(lobbyFov, 44, k)
     } else if (t < 0.72) {
       // Duck through the doorway.
       //
@@ -3242,11 +3386,26 @@ function CameraRig({
       fov = THREE.MathUtils.lerp(39, readFov(aspect, bookZoom), e)
     }
 
+    // Keep the physical book and camera context on screen while bringing one
+    // page close enough to read. Moving both the eye and aim point sideways is
+    // a pure pan across the spread; narrowing the lens supplies the zoom.
+    if (pageZoomAmount.current > 0.001) {
+      const slide = BOOK_WIDTH * 0.245 * pageZoomDirection.current * pageZoomAmount.current
+      pos.x += frame.fz * slide
+      pos.z -= frame.fx * slide
+      look.x += frame.fz * slide
+      look.z -= frame.fx * slide
+      // Leave a slim strip of table beneath the enlarged page for the explicit
+      // Full-book control. At 43° the portrait page touched the bottom edge,
+      // forcing that control onto the paper and covering the page number.
+      fov = THREE.MathUtils.lerp(fov, 48, pageZoomAmount.current)
+    }
+
     if (st.travel > 0.02 && st.travel < 0.99) {
       pos.y += Math.sin(frameState.clock.elapsedTime * 5.2) * 0.02 * (1 - t)
     }
 
-    if (Math.abs(cam.fov - fov) > 0.01) {
+    if (Math.abs(cam.fov - fov) > 0.01 || aspectChanged) {
       cam.fov += (fov - cam.fov) * damp(6.3, dt)
       cam.updateProjectionMatrix()
     }
@@ -3281,6 +3440,8 @@ function CameraRig({
         fov: cam.fov,
         travel: st.travel,
         bookOpen: bookOpen.current,
+        pageZoom,
+        pageZoomAmount: pageZoomAmount.current,
       }
     }
   })
@@ -3348,6 +3509,8 @@ function Scene({
   onEnter,
   onNavigate,
   onZoom,
+  pageZoom,
+  onPageZoom,
   onBookOpenRequest,
   onBookClose,
   prewarmIndex,
@@ -3357,6 +3520,8 @@ function Scene({
   onEnter: (i: TentIndex) => void
   onNavigate: (to: string, from?: PageScreenRect) => void
   onZoom?: (src: string, from: PageScreenRect) => void
+  pageZoom: PageSide | null
+  onPageZoom: (side: PageSide | null) => void
   onBookOpenRequest?: () => void
   /** Fired when an edge-page gesture closes the journal in place. */
   onBookClose?: () => void
@@ -4000,9 +4165,17 @@ function Scene({
       */}
       <hemisphereLight
         ref={hemiLight}
-        args={[NIGHT.hemisphere.sky, NIGHT.hemisphere.ground, NIGHT.hemisphere.intensity]}
+        args={[
+          NIGHT.hemisphere.sky,
+          NIGHT.hemisphere.ground,
+          NIGHT.hemisphere.intensity * (MOBILE_EXPERIENCE ? 1.28 : 1),
+        ]}
       />
-      <ambientLight ref={ambientLightRef} intensity={NIGHT.ambient.intensity} color={NIGHT.ambient.color} />
+      <ambientLight
+        ref={ambientLightRef}
+        intensity={NIGHT.ambient.intensity * (MOBILE_EXPERIENCE ? 1.24 : 1)}
+        color={NIGHT.ambient.color}
+      />
 
       <Ground />
       <Haze center={[CAMP_X, 0]} />
@@ -4037,6 +4210,8 @@ function Scene({
           onHover={handleHover}
           onNavigate={onNavigate}
           onZoom={onZoom}
+          pageZoom={pageZoom}
+          onPageZoom={onPageZoom}
           onBookOpenRequest={() => {
             // Opening eligibility, hover allowance, and the idle glow all use
             // the same readiness flag set by BOOK_INTERACTION_DELAY_MS.
@@ -4095,7 +4270,7 @@ function Scene({
       ) : null}
       {PROFILE_LEAVES ? <Leaves count={55} /> : null}
 
-      <CameraRig state={rig} bookOpen={bookOpen} focusRef={focusRef} onFocus={onFocus} />
+      <CameraRig state={rig} bookOpen={bookOpen} pageZoom={pageZoom} focusRef={focusRef} onFocus={onFocus} />
 
       {/*
         No multisampling.
@@ -4109,7 +4284,7 @@ function Scene({
         entire forest. The scene is soft enough at these light levels that the
         edges it was cleaning up are not what the eye is on.
       */}
-      {frozen('post') === 0 ? null : (
+      {MOBILE_EXPERIENCE || frozen('post') === 0 ? null : (
       <EffectComposer enableNormalPass={false} multisampling={frozen('msaa') ?? 0}>
         <Outline
           ref={setOutlineEffect}
@@ -4635,6 +4810,8 @@ export default function CampHero({
   onEnter,
   onNavigate,
   onZoom,
+  pageZoom = null,
+  onPageZoom,
   onBookOpenRequest,
   onBookClose,
   onProgress,
@@ -4647,6 +4824,8 @@ export default function CampHero({
   onEnter: (i: TentIndex) => void
   onNavigate: (to: string, from?: PageScreenRect) => void
   onZoom?: (src: string, from: PageScreenRect) => void
+  pageZoom?: PageSide | null
+  onPageZoom?: (side: PageSide | null) => void
   /** Fired the moment the reader clicks the closed journal open. */
   onBookOpenRequest?: () => void
   /** Fired when the open journal is put down without leaving the tent. */
@@ -4666,6 +4845,12 @@ export default function CampHero({
     onReady?.()
   }, [onReady])
   const prevEntered = useRef(entered)
+  // The lobby is the long-running, heat-producing view. Render it at 1.5x on
+  // phones, then restore the normal mobile DPR inside a tent so journal text
+  // remains crisp.
+  const canvasDpr = MOBILE_EXPERIENCE && entered === null
+    ? Math.min(GRAPHICS_DPR, 1.5)
+    : GRAPHICS_DPR
 
   useEffect(() => {
     if (prevEntered.current === entered) return
@@ -4688,7 +4873,7 @@ export default function CampHero({
       // staircase however the map was sized or the frustum tightened. A
       // widened PCF kernel is both cheaper and, at this scale, far softer.
       shadows="percentage"
-      dpr={GRAPHICS_DPR}
+      dpr={canvasDpr}
       /*
         The visible scene target is not multisampled or alpha-backed.
 
@@ -4709,16 +4894,21 @@ export default function CampHero({
 
         See OPTIMIZATION.md §3 for what it costs.
       */
-      gl={{ antialias: import.meta.env.DEV, alpha: false, powerPreference: 'high-performance' }}
+      gl={{
+        antialias: import.meta.env.DEV,
+        alpha: false,
+        powerPreference: MOBILE_EXPERIENCE ? 'low-power' : 'high-performance',
+      }}
       camera={{ position: [CAMP_X, EYE + 0.5, 14], fov: 42, near: 0.06, far: 400 }}
       onCreated={(state) => {
+        if (MOBILE_EXPERIENCE) mobileCampState = state
         state.gl.toneMapping = THREE.ACESFilmicToneMapping
         // Back to unity. ACES rolls the top off hard, so the fire and the moon
         // survive it either way — but the extra stop was being spent on
         // everything that is merely lit, which is the whole forest, and a
         // forest a stop up at midnight is the difference between a silhouette
         // and a wall. See NIGHT.
-        state.gl.toneMappingExposure = NIGHT.exposure
+        state.gl.toneMappingExposure = NIGHT.exposure * (MOBILE_EXPERIENCE ? 1.08 : 1)
 
         /*
           Don't ask the driver whether each program linked.
@@ -4759,6 +4949,8 @@ export default function CampHero({
           onEnter={onEnter}
           onNavigate={onNavigate}
           onZoom={onZoom}
+          pageZoom={pageZoom}
+          onPageZoom={onPageZoom ?? (() => {})}
           onBookOpenRequest={onBookOpenRequest}
           onBookClose={onBookClose}
           prewarmIndex={prewarmIndex}

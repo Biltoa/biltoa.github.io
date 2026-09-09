@@ -1,10 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import BackToFire from './components/BackToFire'
 import Footer from './components/Footer'
 import About from './pages/About'
 import ProjectDetail from './pages/ProjectDetail'
-import { resumeInteractionAudio, sfxUiClick, sfxUiHover } from './lib/audio'
+import {
+  resumeAudio,
+  resumeInteractionAudio,
+  sfxUiClick,
+  sfxUiHover,
+  suspendAudio,
+} from './lib/audio'
+import { MOBILE_EXPERIENCE } from './lib/graphics'
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -21,8 +28,9 @@ export default function App() {
   // way back to the fire.
   const landing = pathname === '/'
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = 'light'
+    document.documentElement.dataset.mobile = String(MOBILE_EXPERIENCE)
   }, [])
 
   useEffect(() => {
@@ -30,13 +38,19 @@ export default function App() {
     const targetFor = (target: EventTarget | null) =>
       target instanceof Element ? (target.closest(selector) as HTMLElement | null) : null
 
-    const unlock = () => resumeInteractionAudio()
+    // Safari will not allow audio before the first real gesture. The landing
+    // page unlocks the complete camp mix; written pages unlock UI sounds only.
+    const unlock = () => (landing ? resumeAudio() : resumeInteractionAudio())
     const hover = (event: PointerEvent) => {
       const target = targetFor(event.target)
       if (!target || (event.relatedTarget instanceof Node && target.contains(event.relatedTarget))) return
       sfxUiHover()
     }
     const click = (event: MouseEvent) => {
+      // Treat the click itself as a second unlock opportunity. On iOS a
+      // pointerdown resume can remain pending; the subsequent trusted click is
+      // often the event that is allowed to open the audio output.
+      unlock()
       const target = targetFor(event.target)
       if (!target) return
       const kind = target.dataset.sfx
@@ -44,23 +58,42 @@ export default function App() {
         kind === 'toggle' || kind === 'fullscreen' || kind === 'back' ? kind : 'click'
       )
     }
+    const suspendIfHidden = () => {
+      if (document.visibilityState !== 'visible') suspendAudio()
+    }
 
     window.addEventListener('pointerdown', unlock, true)
+    window.addEventListener('keydown', unlock, true)
+    if (MOBILE_EXPERIENCE) {
+      window.addEventListener('blur', suspendAudio)
+      window.addEventListener('pagehide', suspendAudio)
+      document.addEventListener('visibilitychange', suspendIfHidden)
+    }
     document.addEventListener('pointerover', hover)
     document.addEventListener('click', click, true)
     return () => {
       window.removeEventListener('pointerdown', unlock, true)
+      window.removeEventListener('keydown', unlock, true)
+      if (MOBILE_EXPERIENCE) {
+        window.removeEventListener('blur', suspendAudio)
+        window.removeEventListener('pagehide', suspendAudio)
+        document.removeEventListener('visibilitychange', suspendIfHidden)
+      }
       document.removeEventListener('pointerover', hover)
       document.removeEventListener('click', click, true)
     }
-  }, [])
+  }, [landing])
 
   // The camp is warm paper; the written-out work is a dark reading surface set
   // in a single face. They are different rooms, so the switch is on the root
   // element rather than on a wrapper — the footer and the way back to the fire
   // sit outside the page and have to change with it.
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.surface = landing ? 'camp' : 'work'
+    if (MOBILE_EXPERIENCE) {
+      const mobileTheme = document.querySelector<HTMLMetaElement>('#mobile-theme-color')
+      mobileTheme?.setAttribute('content', landing ? '#070914' : '#EFE9DF')
+    }
   }, [landing])
 
   return (

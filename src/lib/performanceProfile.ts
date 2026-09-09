@@ -25,6 +25,9 @@ const PROFILE_EVENTS_ENABLED =
   new URLSearchParams(window.location.search).get('fps') === '1'
 
 const MAX_PENDING_EVENTS = 256
+const MOBILE_DIAGNOSTICS = typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('mobileDiag') === '1'
+const diagnosticEvents: unknown[] = []
 let sink: ProfileEventSink | null = null
 const pending: ProfileEvent[] = []
 
@@ -36,6 +39,20 @@ const pending: ProfileEvent[] = []
  * lets early loader stages appear on the same timeline as later Unity work.
  */
 export function markProfileEvent(label: string, options: ProfileEventOptions = {}) {
+  if (MOBILE_DIAGNOSTICS) {
+    const entry = { time: new Date().toISOString(), ms: performance.now(), label, ...options }
+    diagnosticEvents.push(entry)
+    if (diagnosticEvents.length > 128) diagnosticEvents.shift()
+    console.info('[mobile-diag]', JSON.stringify(entry))
+    try {
+      // Keep a previous page's tail until the first event of this page.
+      if (diagnosticEvents.length === 1) {
+        const previous = localStorage.getItem('portfolio-mobile-diag')
+        if (previous) localStorage.setItem('portfolio-mobile-diag-previous', previous)
+      }
+      localStorage.setItem('portfolio-mobile-diag', JSON.stringify(diagnosticEvents))
+    } catch { /* Diagnostics must also work when storage is unavailable. */ }
+  }
   if (!PROFILE_EVENTS_ENABLED) return
 
   const durationMs = Number.isFinite(options.durationMs) ? Math.max(0, options.durationMs ?? 0) : 0

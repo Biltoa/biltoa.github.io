@@ -4,6 +4,7 @@ import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { AURORA_BOUNCE_HIGH, AURORA_BOUNCE_LOW, AURORA_BOUNCE_MID, applyWind } from './wind'
 import { attachDebugGain, TREE_GAIN, GRASS_GAIN } from './debugGain'
+import { MOBILE_EXPERIENCE } from '../../lib/graphics'
 
 /**
  * Bark materials, one per species, collected as they're built so the
@@ -312,9 +313,9 @@ export function useKit() {
           // Texture-masked sky floor. Thin blades frequently face away from
           // both directionals; a very low cool emissive keeps their printed
           // detail visible without turning the field into a self-lit carpet.
-          emissive: new THREE.Color('#31563a'),
+          emissive: new THREE.Color(MOBILE_EXPERIENCE ? '#4d7256' : '#31563a'),
           emissiveMap: src.map,
-          emissiveIntensity: 1,
+          emissiveIntensity: MOBILE_EXPERIENCE ? 1.24 : 1,
         })
         applyWind(m, {
           amplitude: 0.075,
@@ -344,7 +345,7 @@ export function useKit() {
           mapTint: new THREE.Color('#587f52'),
           // The soil end. Still the ambient occlusion under every tent, bench
           // and trunk that no shadow map at this scale can draw.
-          rootTint: new THREE.Color('#18261d'),
+          rootTint: new THREE.Color(MOBILE_EXPERIENCE ? '#304735' : '#18261d'),
           // And the moonlit tips. Warm-dark rather than the old blue-green:
           // the far field in the reference is near-black with a red cast, not
           // a cool one, because nothing cold reaches the floor of a clearing.
@@ -354,7 +355,7 @@ export function useKit() {
           // the fire stopped reading as the thing lighting the field. The far
           // end of the ramp is a dark blue-green now; the warm terms below are
           // unchanged, so the pool round the fire is the only warm ground.
-          tipTint: new THREE.Color('#50735b'),
+          tipTint: new THREE.Color(MOBILE_EXPERIENCE ? '#6b8e72' : '#50735b'),
           coolGain: 1.02,
           // The fire and six torches are the only warm light in the clearing
           // and the field is what they are standing in; a camp whose grass does

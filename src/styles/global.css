@@ -827,6 +827,61 @@ select {
     transform 0.25s var(--ease);
 }
 
+.camp-orientation {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 11px;
+  padding: 24px;
+  color: #ffd08a;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(99, 48, 35, 0.28), transparent 38%),
+    #10080e;
+  text-align: center;
+}
+
+.camp-orientation strong,
+.camp-orientation small {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.camp-orientation strong {
+  font-size: 0.82rem;
+}
+
+.camp-orientation small {
+  max-width: 38ch;
+  color: rgba(255, 239, 218, 0.7);
+  font-size: 0.56rem;
+  line-height: 1.5;
+}
+
+.camp-orientation__phone {
+  position: relative;
+  width: 27px;
+  height: 44px;
+  border: 2px solid currentColor;
+  border-radius: 5px;
+  box-shadow: 0 0 22px rgba(255, 160, 60, 0.28);
+}
+
+.camp-orientation__phone::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
 .tentsign[data-hidden='true'] {
   opacity: 0;
   transform: translateY(-8px);
@@ -2648,6 +2703,123 @@ html.is-loading body {
     visibility 0s linear 0s;
 }
 
+.bookplayer__rotate {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  padding: 90px 28px 28px;
+  color: #fff0d0;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(72, 45, 27, 0.38), transparent 38%),
+    #05070c;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.bookplayer__rotate strong {
+  font-size: 0.86rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.bookplayer__rotate small {
+  font-size: 0.64rem;
+  opacity: 0.7;
+}
+
+.bookplayer__rotate-phone {
+  position: relative;
+  width: 34px;
+  height: 54px;
+  border: 2px solid currentColor;
+  border-radius: 6px;
+  animation: bookplayer-rotate-phone 1.8s var(--ease) infinite;
+}
+
+.bookplayer__rotate-phone::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+
+@keyframes bookplayer-rotate-phone {
+  0%, 28% { transform: rotate(0deg); }
+  68%, 100% { transform: rotate(90deg); }
+}
+
+.bookplayer__frame:fullscreen,
+.bookplayer__frame:-webkit-full-screen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  opacity: 1 !important;
+  background: #000;
+}
+
+.bookplayer__safari-immersive {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: max(56px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  color: #fff0d0;
+  background: rgba(5, 6, 9, 0.72);
+  font-family: var(--font-mono);
+  text-align: center;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  backdrop-filter: blur(3px);
+}
+
+.bookplayer__safari-immersive-arrow {
+  font: 2.4rem/1 var(--font-mono);
+  animation: safari-swipe-cue 850ms ease-in-out infinite alternate;
+}
+
+.bookplayer__safari-immersive strong {
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.bookplayer__safari-immersive small {
+  font-size: 0.64rem;
+  opacity: 0.78;
+}
+
+.bookplayer__safari-immersive button {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 240, 208, 0.55);
+  border-radius: 50%;
+  color: #fff0d0;
+  background: rgba(4, 7, 12, 0.72);
+  font-size: 1.2rem;
+}
+
+@keyframes safari-swipe-cue {
+  from { transform: translateY(7px); opacity: 0.65; }
+  to { transform: translateY(-7px); opacity: 1; }
+}
+
 .bookplayer__veil[data-hidden='true'] {
   opacity: 0;
   visibility: hidden;
@@ -2695,6 +2867,7 @@ html.is-loading body {
 
 .bookplayer__controls {
   position: absolute;
+  z-index: 10;
   left: 0;
   right: 0;
   top: 0;
@@ -2706,6 +2879,9 @@ html.is-loading body {
   /* Hidden until the frame has arrived: controls sliding around inside a
      growing box read as a bug. */
   opacity: 0;
+  /* The strip spans the full viewport. Keep its empty area transparent to
+     pointer input so Unity's top-right pause button remains tappable. */
+  pointer-events: none;
   transition: opacity 260ms var(--ease) 420ms;
 }
 
@@ -2714,6 +2890,7 @@ html.is-loading body {
 }
 
 .bookplayer__controls .btn {
+  pointer-events: auto;
   background: rgba(4, 7, 12, 0.78);
   border-color: rgba(255, 255, 255, 0.72);
   color: #fff;
@@ -2727,6 +2904,21 @@ html.is-loading body {
     background-color 220ms var(--ease),
     border-color 220ms var(--ease),
     transform 220ms var(--ease);
+}
+
+.bookplayer__back {
+  white-space: nowrap;
+}
+
+.bookplayer__controls[data-portrait='true'] {
+  right: auto;
+  padding: max(14px, env(safe-area-inset-top)) 14px;
+  background: none;
+}
+
+.bookplayer__controls[data-portrait='true'] .bookplayer__back {
+  min-height: 44px;
+  padding-inline: 14px;
 }
 
 .bookplayer__controls .btn:hover,
@@ -2747,6 +2939,180 @@ html.is-loading body {
   padding: 2px 6px;
   margin-left: 8px;
   opacity: 0.7;
+}
+
+/* A phone tap opens one journal leaf at native texture resolution instead of
+   asking the reader to decipher both leaves after perspective and scene
+   scaling. The physical book remains underneath; swiping or the large footer
+   controls moves through individual pages, and closing returns to that spread. */
+.mobile-book-reader {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: #f7ead1;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(84, 56, 31, 0.22), transparent 54%),
+    #090806;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.mobile-book-reader__header,
+.mobile-book-reader__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-inline: max(14px, env(safe-area-inset-left), env(safe-area-inset-right));
+  background: rgba(7, 6, 5, 0.96);
+}
+
+.mobile-book-reader__header {
+  min-height: 58px;
+  padding-top: env(safe-area-inset-top);
+  border-bottom: 1px solid rgba(255, 207, 139, 0.22);
+  font-size: 0.72rem;
+  letter-spacing: 0.11em;
+}
+
+.mobile-book-reader__header button,
+.mobile-book-reader__controls button {
+  min-height: 42px;
+  padding: 9px 13px;
+  border: 1px solid rgba(255, 225, 182, 0.52);
+  border-radius: 2px;
+  color: #fff4df;
+  background: #21170f;
+  font: 700 0.7rem/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mobile-book-reader__viewport {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.mobile-book-reader__page {
+  position: relative;
+  width: min(calc(100vw - 24px), calc((100dvh - 154px) * 0.621875));
+  aspect-ratio: 796 / 1280;
+  overflow: hidden;
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 1px rgba(95, 59, 28, 0.75),
+    0 16px 52px rgba(0, 0, 0, 0.62);
+  background: #c8b58b;
+}
+
+.mobile-book-reader__page > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mobile-book-reader__hotspot {
+  position: absolute;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  -webkit-tap-highlight-color: rgba(52, 143, 145, 0.24);
+}
+
+.mobile-book-reader__hotspot:focus-visible {
+  outline: 2px solid #4fb3b5;
+  outline-offset: 1px;
+}
+
+.mobile-book-reader__hotspot--image {
+  z-index: 1;
+}
+
+.mobile-book-reader__controls {
+  min-height: 68px;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid rgba(255, 207, 139, 0.22);
+}
+
+.mobile-book-reader__controls span {
+  color: rgba(247, 234, 209, 0.58);
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+
+.mobile-book-reader__controls button:disabled {
+  opacity: 0.28;
+}
+
+/* In-scene journal magnifiers. Each control sits beneath the page it affects;
+   the camera (rather than a second document-style panel) performs the close
+   read. Their square framing matches the room's Back-to-fire control. */
+.book-page-zoom {
+  position: absolute;
+  inset: 0;
+  z-index: 34;
+  pointer-events: none;
+  animation: book-page-zoom-in 340ms var(--ease) 620ms both;
+}
+
+@keyframes book-page-zoom-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.book-page-zoom__button {
+  position: absolute;
+  top: 72%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 132px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 203, 126, 0.62);
+  border-radius: 4px;
+  color: #ffd08a;
+  background: rgba(18, 8, 14, 0.72);
+  box-shadow: 0 0 22px rgba(255, 148, 54, 0.2);
+  backdrop-filter: blur(7px);
+  pointer-events: auto;
+}
+
+.book-page-zoom__button--left { left: 8%; }
+.book-page-zoom__button--right { right: 8%; }
+.book-page-zoom__button--out {
+  top: 88%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.book-page-zoom__button svg {
+  width: 27px;
+  height: 27px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.book-page-zoom__button span {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 /* ----------------------------------------------------------------- bookzoom */
@@ -2919,84 +3285,167 @@ body.camp-zoom {
 /*  that is much shorter, much smaller, or much larger than those.             */
 /* -------------------------------------------------------------------------- */
 
-/*
-  Rotate card. Only ever on screen for a touch device held upright, and only
-  over the camp — the written-out pages read perfectly well in portrait.
-*/
-.rotategate {
-  display: none;
+/* The campsite is a single-screen app on every mobile orientation. Lock the
+   document itself as well as the stage so iOS cannot expose a white overscroll
+   or safe-area gutter. Desktop remains governed by the long sticky hero. */
+:root[data-mobile='true'][data-surface='camp'],
+:root[data-mobile='true'][data-surface='camp'] body,
+:root[data-mobile='true'][data-surface='camp'] #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #070914;
 }
 
-@media (orientation: portrait) and (pointer: coarse) {
-  :root[data-surface='camp'] .rotategate {
+:root[data-mobile='true'][data-surface='camp'] main,
+:root[data-mobile='true'][data-surface='camp'] .page--flush {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The journal owns one-finger page drags. Native two-finger canvas gestures
+   can cancel only one captured pointer on iOS and leave the turning leaf in a
+   permanent held state, so the camp canvas is not a browser zoom surface.
+   This is mobile/camp-only; desktop input and the rest of the site are intact. */
+:root[data-mobile='true'][data-surface='camp'] .hero__canvas {
+  touch-action: none;
+}
+
+/* Portrait phones receive a separate composition; desktop CSS is untouched. */
+@media (orientation: portrait) {
+  :root[data-mobile='true'] {
+    --gutter: 14px;
+    --nav-h: 0px;
+  }
+
+  :root[data-mobile='true'] .hero--camp {
+    height: 100svh;
+  }
+
+  :root[data-mobile='true'] .hero__stage {
+    height: 100svh;
+  }
+
+  :root[data-mobile='true'] .bookplayer {
     position: fixed;
     inset: 0;
-    z-index: 900;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    text-align: center;
-    background: radial-gradient(120% 90% at 50% 30%, #14213f 0%, #070a16 70%);
-    color: #f4ead9;
-  }
-  /* Nothing behind it should be running, listening, or scrollable. */
-  :root[data-surface='camp'] body,
-  :root[data-surface='camp'] .hero--camp {
+    width: 100%;
+    height: 100dvh;
     overflow: hidden;
   }
-}
 
-.rotategate__inner {
-  max-width: 22rem;
-}
-
-.rotategate__glyph {
-  width: 74px;
-  height: 74px;
-  margin: 0 auto 22px;
-  display: block;
-  fill: none;
-  stroke: #ffc477;
-  stroke-width: 3;
-  stroke-linecap: round;
-  transform-origin: 50% 50%;
-  animation: rotategate-tip 2.6s var(--ease) infinite;
-}
-
-@keyframes rotategate-tip {
-  0%,
-  35% {
-    transform: rotate(0deg);
+  :root[data-mobile='true'] .campui__name {
+    top: max(18px, env(safe-area-inset-top));
   }
-  55%,
-  90% {
-    transform: rotate(-90deg);
+
+  :root[data-mobile='true'] .campui__title {
+    font-size: 1.85rem;
   }
-  100% {
-    transform: rotate(0deg);
+
+  :root[data-mobile='true'] .campui__rule {
+    width: 154px;
+    margin-block: 8px 7px;
+  }
+
+  :root[data-mobile='true'] .campui__role {
+    max-width: calc(100vw - 28px);
+    font-size: clamp(0.52rem, 2.15vw, 0.58rem);
+    line-height: 1.45;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+  }
+
+  :root[data-mobile='true'] .tentsign__label {
+    font-size: 26px;
+    letter-spacing: 0.055em;
+  }
+
+  :root[data-mobile='true'] .tentsign__arrow {
+    width: 116px;
+  }
+
+  :root[data-mobile='true'] .campui__hint {
+    right: 10px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    max-width: none;
+    gap: 6px;
+    font-size: 0.64rem;
+    line-height: 1.35;
+    letter-spacing: 0.09em;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  :root[data-mobile='true'] .campui__hint,
+  :root[data-mobile='true'] .tentswitch.audioswitch {
+    height: 32px;
+    padding: 0;
+    margin: 0;
+    align-items: center;
+    gap: 6px;
+  }
+
+  :root[data-mobile='true'] .campui__hintcursor {
+    width: 28px;
+    height: 28px;
+  }
+
+  :root[data-mobile='true'] .audioswitch__icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  :root[data-mobile='true'] .campui__hintcursor-ring {
+    width: 24px;
+    height: 24px;
+    animation-name: camp-hintring-mobile;
+  }
+
+  :root[data-mobile='true'] .tentswitch.audioswitch {
+    left: 10px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    font-size: 0.64rem;
+    line-height: 1.35;
+    letter-spacing: 0.09em;
+  }
+
+  :root[data-mobile='true'] .doorback {
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left));
+    top: max(14px, calc(env(safe-area-inset-top) + 8px));
+    z-index: 55;
+    max-width: calc(100vw - 24px);
+    font-size: 0.66rem;
+    line-height: 1.35;
+    letter-spacing: 0.1em;
+    color: #ffd08a;
+    background: rgba(18, 8, 14, 0.68);
+    box-shadow: 0 0 0 1px rgba(255, 196, 119, 0.34), 0 0 20px rgba(255, 139, 55, 0.12);
+    backdrop-filter: blur(7px);
+  }
+
+  /* Navigation out of both the journal and the gameplay player must be
+     available immediately; it cannot wait behind an opening animation. */
+  :root[data-mobile='true'] .bookplayer__controls,
+  :root[data-mobile='true'] .bookplayer[data-phase='open'] .bookplayer__controls {
+    position: fixed;
+    z-index: 55;
+    opacity: 1;
+    transition: none;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .rotategate__glyph {
-    animation: none;
-    transform: rotate(-90deg);
-  }
-}
-
-.rotategate__title {
-  margin: 0 0 10px;
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.rotategate__body {
-  margin: 0;
-  font-size: 0.95rem;
-  line-height: 1.55;
-  color: rgba(244, 234, 217, 0.72);
+@keyframes camp-hintring-mobile {
+  0%, 100% { width: 22px; height: 22px; opacity: 0.82; }
+  50% { width: 29px; height: 29px; opacity: 1; }
 }
 
 /*
@@ -3009,9 +3458,18 @@ body.camp-zoom {
   the height, is left alone.
 */
 @media (orientation: landscape) and (max-height: 500px) {
+  :root[data-mobile='true'] .hero--camp,
+  :root[data-mobile='true'] .hero__stage {
+    height: 100dvh;
+  }
+
   :root {
     --nav-h: 44px;
     --gutter: clamp(12px, 2.2vw, 24px);
+  }
+
+  :root[data-mobile='true'] {
+    --gutter: max(12px, env(safe-area-inset-left), env(safe-area-inset-right));
   }
 
   .campui__title {
@@ -3053,6 +3511,12 @@ body.camp-zoom {
     height: 26px;
   }
 
+  :root[data-mobile='true'] .audioswitch__icon {
+    width: 26px;
+    height: 26px;
+    font-size: 0.92rem;
+  }
+
   .tentswitch,
   .tentswitch.audioswitch {
     font-size: 0.62rem;
@@ -3061,6 +3525,57 @@ body.camp-zoom {
 
   .tentswitch.audioswitch {
     bottom: 10px;
+  }
+
+  :root[data-mobile='true'] .campui__name {
+    bottom: max(38px, calc(env(safe-area-inset-bottom) + 28px));
+  }
+
+  :root[data-mobile='true'] .campui__hint,
+  :root[data-mobile='true'] .tentswitch.audioswitch {
+    bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  :root[data-mobile='true'] .tentsign__label {
+    font-size: 22px;
+    letter-spacing: 0.05em;
+  }
+
+  :root[data-mobile='true'] .tentsign__arrow {
+    width: 116px;
+  }
+
+  :root[data-mobile='true'] .bookplayer__controls {
+    position: fixed;
+    z-index: 55;
+    opacity: 1;
+    gap: 6px;
+    padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
+    transition: none;
+  }
+
+  :root[data-mobile='true'] .bookplayer {
+    position: fixed;
+    width: 100%;
+    height: 100dvh;
+  }
+
+  /* Unlike 100vh, the dynamic viewport excludes Safari's visible bars and
+     grows when they collapse. Unity therefore never renders its bottom HUD
+     underneath browser chrome. */
+  :root[data-mobile='true'] .hero__stage {
+    height: 100dvh;
+  }
+
+  :root[data-mobile='true'] .bookplayer__controls .btn {
+    min-height: 38px;
+    padding: 7px 10px;
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+  }
+
+  :root[data-mobile='true'] .bookplayer__controls kbd {
+    display: none;
   }
 
 }

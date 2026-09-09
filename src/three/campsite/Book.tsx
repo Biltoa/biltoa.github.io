@@ -11,6 +11,7 @@ import {
   sfxUiHover,
 } from '../../lib/audio'
 import { damp } from '../../lib/scroll'
+import { MOBILE_EXPERIENCE } from '../../lib/graphics'
 import { BOOK_COVER_SUBTITLE, BOOK_TITLE, bookSpreads } from './bookContent'
 import {
   PAGE_H,
@@ -188,6 +189,11 @@ function makePaperMaterial(paper: THREE.Texture, ink: THREE.Texture) {
              by fixing the lights because the lights are also what makes the
              room look like a room.
            */
+           // The journal has its own stable reading exposure. Retain a little
+           // room shading so it remains physical, but do not let a stronger
+           // lantern erase the ink or make opening the cover change exposure.
+           vec3 stablePaper = diffuseColor.rgb * 1.08;
+           outgoingLight = mix( outgoingLight, stablePaper, 0.78 );
            outgoingLight = outgoingLight / ( 1.0 + outgoingLight * 0.62 );
          }
          #include <opaque_fragment>`
@@ -402,13 +408,14 @@ function makeLeafMaterial(front: THREE.Texture, back: THREE.Texture) {
          // Neutral paper exposure calibrated to the resting page. The former
          // 1.62 multiplier was visibly brighter than the page block, so the
          // first non-zero drag frame looked like a light had switched on.
-         vec3 stableLeaf = diffuseColor.rgb * 1.12;
+         vec3 stableLeaf = diffuseColor.rgb * 1.08;
          // Keep the real lighting through the first part of the lift, then
          // progressively stabilize it as the sheet turns away from the lamps.
          // This preserves a continuous grab while still preventing the upright
          // page from falling several stops into brown.
          float exposureHold = smoothstep( 0.08, 0.72, uTurnLift );
-         outgoingLight = mix( outgoingLight, stableLeaf, exposureHold );
+         float stableMix = mix( 0.78, 1.0, exposureHold );
+         outgoingLight = mix( outgoingLight, stableLeaf, stableMix );
          outgoingLight = outgoingLight / ( 1.0 + outgoingLight * 0.62 );
          #include <opaque_fragment>`
       )
@@ -543,6 +550,8 @@ function makePageCanvas() {
 
 /* -------------------------------------------------------------------------- */
 
+export type PageSide = 'left' | 'right'
+
 export interface BookProps {
   index: number
   /** Metres, measured across the open spread. */
@@ -578,6 +587,9 @@ export interface BookProps {
    * of the page rather than appear over it.
    */
   onZoom?: (src: string, from: PageScreenRect) => void
+  /** The page currently filling a mobile portrait frame, if either. */
+  pageZoom?: PageSide | null
+  onPageZoom?: (side: PageSide | null) => void
   /** Fired when the closed cover is clicked — arms `openRef` upstream. */
   onOpenRequest: () => void
   /** The single upstream hover state shared by scale and outline selection. */
@@ -601,6 +613,8 @@ export default function Book({
   live,
   onNavigate,
   onZoom,
+  pageZoom = null,
+  onPageZoom,
   onOpenRequest,
   closedHot,
   onClosedHover,
@@ -618,20 +632,19 @@ export default function Book({
    * to read the camera on a click.
    */
   const getThree = useThree((s) => s.get)
-
   const spreads = useMemo(() => bookSpreads(index), [index])
-  const imageSources = useMemo(
-    () => [
-      ...new Set(spreads.flatMap((sp) => [...imagesIn(sp.left), ...imagesIn(sp.right)])),
-    ],
-    [spreads]
-  )
 
   // Clamped: the three journals are different lengths, and the parameter is
   // set once for all of them.
   const [spread, setSpread] = useState(
     FROZEN_SPREAD === null ? 0 : Math.max(0, Math.min(FROZEN_SPREAD, spreads.length - 1))
   )
+  const imageSources = useMemo(() => {
+    const visibleSpreads = MOBILE_EXPERIENCE
+      ? (enabled ? spreads.slice(Math.max(0, spread - 1), spread + 2) : [])
+      : spreads
+    return [...new Set(visibleSpreads.flatMap((sp) => [...imagesIn(sp.left), ...imagesIn(sp.right)]))]
+  }, [spreads, enabled, spread])
   const hoveredLink = useRef<PageHoverTransition | null>(null)
   const hoveredImage = useRef<PageHoverTransition | null>(null)
   const [hits, setHits] = useState<{ hit: Hit; side: 'left' | 'right' }[]>([])
@@ -650,6 +663,14 @@ export default function Book({
   const leftPage = useRef<THREE.Mesh>(null)
   const turn = useRef<TurnState>({ t: 1, dir: 1, to: 0, mode: 'idle' })
   const pageDrag = useRef<PageDragState | null>(null)
+  /**
+   * Mobile Safari can promote a second pointer into a native pinch gesture
+   * without delivering the original page pointer's normal `pointerup`. Keep
+   * ownership at the canvas boundary so a two-finger gesture cannot strand a
+   * page turn with nobody left to drive it.
+   */
+  const activeTouchPointers = useRef(new Set<number>())
+  const multiTouchBlocked = useRef(false)
   /** While a held drag is exactly flat, draw the stationary page block instead
       of a visually similar second material laid over it. */
   const dragEndpoint = useRef<'start' | 'end' | null>(null)
@@ -658,6 +679,14 @@ export default function Book({
       final closed pose. The next frames can leave those invariant transforms
       alone while retaining the candle-driven material response. */
   const inactiveSettled = useRef(false)
+  // React's development Strict Mode probes every effect with a cleanup/setup
+  // cycle while the component is still mounted. Real disposal is delayed one
+  // task so the matching setup can cancel that probe; a true unmount has no
+  // setup and therefore releases the resources immediately afterward.
+  const partsDisposalTimer = useRef(0)
+  const leatherDisposalTimer = useRef(0)
+  const pageDisposalTimer = useRef(0)
+  const materialDisposalTimer = useRef(0)
   /** This frame's `open`, mirrored for the cover's click handler — an event
       callback closes over stale state otherwise, and `open` itself only
       exists inside the animation frame below. */
@@ -681,17 +710,19 @@ export default function Book({
     }),
     []
   )
-  useEffect(
-    () => () => {
-      parts.left.geometry.dispose()
-      parts.right.geometry.dispose()
-      parts.coverL.dispose()
-      parts.coverR.dispose()
-      parts.spine.dispose()
-      parts.gutter.dispose()
-    },
-    [parts]
-  )
+  useEffect(() => {
+    window.clearTimeout(partsDisposalTimer.current)
+    return () => {
+      partsDisposalTimer.current = window.setTimeout(() => {
+        parts.left.geometry.dispose()
+        parts.right.geometry.dispose()
+        parts.coverL.dispose()
+        parts.coverR.dispose()
+        parts.spine.dispose()
+        parts.gutter.dispose()
+      }, 0)
+    }
+  }, [parts])
 
   /* ------------------------------------------------------------ materials */
 
@@ -701,13 +732,15 @@ export default function Book({
     [accent, index, binding]
   )
   const edgeTex = useMemo(() => makeEdgeTexture(51 + index * 13), [index])
-  useEffect(
-    () => () => {
-      leather.dispose()
-      edgeTex.dispose()
-    },
-    [leather, edgeTex]
-  )
+  useEffect(() => {
+    window.clearTimeout(leatherDisposalTimer.current)
+    return () => {
+      leatherDisposalTimer.current = window.setTimeout(() => {
+        leather.dispose()
+        edgeTex.dispose()
+      }, 0)
+    }
+  }, [leather, edgeTex])
 
   const coverMat = useMemo(
     () =>
@@ -790,38 +823,46 @@ export default function Book({
     [leafFront, leafBack]
   )
 
-  useEffect(
-    () => () => {
-      for (const page of [
-        leftPaper,
-        rightPaper,
-        leftInk,
-        rightInk,
-        leafFront,
-        leafBack,
-        coverPage,
-      ]) {
-        page.tex.dispose()
-      }
-    },
-    [leftPaper, rightPaper, leftInk, rightInk, leafFront, leafBack, coverPage]
-  )
+  useEffect(() => {
+    window.clearTimeout(pageDisposalTimer.current)
+    return () => {
+      pageDisposalTimer.current = window.setTimeout(() => {
+        for (const page of [
+          leftPaper,
+          rightPaper,
+          leftInk,
+          rightInk,
+          leafFront,
+          leafBack,
+          coverPage,
+        ]) {
+          page.tex.dispose()
+          // Disposing a CanvasTexture releases its GPU object, not the large
+          // 2D backing store. Shrinking it releases the pixels immediately.
+          page.ctx.canvas.width = 1
+          page.ctx.canvas.height = 1
+        }
+      }, 0)
+    }
+  }, [leftPaper, rightPaper, leftInk, rightInk, leafFront, leafBack, coverPage])
 
-  useEffect(
-    () => () => {
-      for (const m of [
-        coverMat,
-        edgeMat,
-        gutterMat,
-        leftMat.material,
-        rightMat.material,
-        leafMat.material,
-      ]) {
-        m.dispose()
-      }
-    },
-    [coverMat, edgeMat, gutterMat, leftMat, rightMat, leafMat]
-  )
+  useEffect(() => {
+    window.clearTimeout(materialDisposalTimer.current)
+    return () => {
+      materialDisposalTimer.current = window.setTimeout(() => {
+        for (const m of [
+          coverMat,
+          edgeMat,
+          gutterMat,
+          leftMat.material,
+          rightMat.material,
+          leafMat.material,
+        ]) {
+          m.dispose()
+        }
+      }, 0)
+    }
+  }, [coverMat, edgeMat, gutterMat, leftMat, rightMat, leafMat])
 
   /* -------------------------------------------------------------- content */
 
@@ -940,6 +981,83 @@ export default function Book({
     paintSide('right')
     publishPainted()
   }
+
+  /** Restore the stationary spread after Safari interrupts a held page. */
+  const resetInterruptedPageGesture = useCallback(() => {
+    if (pageDrag.current === null && turn.current.mode === 'idle') return
+
+    pageDrag.current = null
+    dragEndpoint.current = null
+    turn.current = { t: 1, dir: 1, to: spread, mode: 'idle' }
+    shown.current = { left: spread, right: spread }
+    repaint()
+    if (leaf.current) {
+      leaf.current.visible = false
+      leaf.current.rotation.z = 0
+    }
+
+    if (import.meta.env.DEV) {
+      document.documentElement.dataset.bookGestureReset = String(
+        Number(document.documentElement.dataset.bookGestureReset ?? 0) + 1
+      )
+    }
+    // `repaint` intentionally follows the currently rendered spread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spread])
+
+  useEffect(() => {
+    if (!MOBILE_EXPERIENCE || !live) return
+
+    const canvas = getThree().gl.domElement
+    const pointers = activeTouchPointers.current
+
+    const blockMultiTouch = (event: Event) => {
+      if (event.cancelable) event.preventDefault()
+      multiTouchBlocked.current = true
+      resetInterruptedPageGesture()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') return
+      pointers.add(event.pointerId)
+      if (!event.isPrimary || pointers.size > 1) blockMultiTouch(event)
+    }
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') return
+      pointers.delete(event.pointerId)
+      if (pointers.size === 0) multiTouchBlocked.current = false
+    }
+    const onPointerCancel = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') return
+      pointers.delete(event.pointerId)
+      resetInterruptedPageGesture()
+      if (pointers.size === 0) multiTouchBlocked.current = false
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches.length > 1) blockMultiTouch(event)
+    }
+
+    // Capture sees the second contact before R3F can hand it a page gesture.
+    canvas.addEventListener('pointerdown', onPointerDown, true)
+    canvas.addEventListener('pointerup', onPointerUp, true)
+    canvas.addEventListener('pointercancel', onPointerCancel, true)
+    canvas.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })
+    // Older iOS releases expose pinch through WebKit's gesture events even
+    // when Pointer Events are present. String event names keep this harmless
+    // on browsers that do not implement them.
+    canvas.addEventListener('gesturestart', blockMultiTouch, { capture: true, passive: false })
+    canvas.addEventListener('gesturechange', blockMultiTouch, { capture: true, passive: false })
+
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown, true)
+      canvas.removeEventListener('pointerup', onPointerUp, true)
+      canvas.removeEventListener('pointercancel', onPointerCancel, true)
+      canvas.removeEventListener('touchmove', onTouchMove, true)
+      canvas.removeEventListener('gesturestart', blockMultiTouch, true)
+      canvas.removeEventListener('gesturechange', blockMultiTouch, true)
+      pointers.clear()
+      multiTouchBlocked.current = false
+    }
+  }, [getThree, live, resetInterruptedPageGesture])
 
   const setLinkHover = (hit: Hit, side: 'left' | 'right') => {
     const previous = hoveredLink.current
@@ -1142,8 +1260,15 @@ export default function Book({
   // by walking out — and none of those go through `go`, so the sound has to be
   // hung off the journal going dark rather than off the control that did it.
   useEffect(() => {
-    if (!live && openLevel.current > 0.05) sfxBookClose()
-  }, [live])
+    if (!live) {
+      // Do this at the start of the close, not after the tent transition. A
+      // stranded turning mesh otherwise remains visible outside the cover for
+      // the whole closing shot even though the later `enabled` reset repairs
+      // the next visit.
+      if (MOBILE_EXPERIENCE) resetInterruptedPageGesture()
+      if (openLevel.current > 0.05) sfxBookClose()
+    }
+  }, [live, resetInterruptedPageGesture])
 
   useEffect(() => {
     if (!enabled) {
@@ -1307,6 +1432,7 @@ export default function Book({
     // the last. There's nowhere left to turn to, so that page gesture shuts
     // the journal instead of doing nothing.
     if (to < 0 || to >= spreads.length) {
+      onPageZoom?.(null)
       sfxBookClose()
       onClose()
       return
@@ -1324,13 +1450,20 @@ export default function Book({
     // which is exactly what makes a turn read as a texture swap rather than as
     // paper. The half the sheet is landing *on* keeps its old page until the
     // sheet covers it — the sheet's own back face is what replaces it.
+    onPageZoom?.(null)
     if (stageTurn(to, dir, 'commit')) sfxPageTurn()
   }
 
   const pointerX = (event: ThreeEvent<PointerEvent>) => event.nativeEvent.clientX
 
   const beginPageGesture = (side: 'left' | 'right', event: ThreeEvent<PointerEvent>) => {
-    if (!armed || turn.current.mode !== 'idle') return
+    if (
+      !armed ||
+      turn.current.mode !== 'idle' ||
+      (MOBILE_EXPERIENCE && (multiTouchBlocked.current || !event.nativeEvent.isPrimary))
+    ) {
+      return
+    }
     event.stopPropagation()
     ;(event.target as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture(
       event.pointerId
@@ -1352,6 +1485,7 @@ export default function Book({
     event.stopPropagation()
     const dx = pointerX(event) - drag.startX
     if (!drag.started && Math.abs(dx) >= 4) {
+      onPageZoom?.(null)
       drag.started = stageTurn(drag.to, drag.dir, 'drag')
       if (drag.started) sfxPageDrag()
     }
@@ -1371,7 +1505,9 @@ export default function Book({
     pageDrag.current = null
 
     if (!drag.started) {
-      if (!cancelled) go(drag.dir)
+      // A tap on mobile is intentionally inert. Reading zoom belongs only to
+      // the labelled controls below the pages; dragging still turns a page.
+      if (!cancelled && !MOBILE_EXPERIENCE) go(drag.dir)
       return
     }
 
@@ -1967,7 +2103,13 @@ export default function Book({
                 rect={hit}
                 onOver={() => setLinkHover(hit, side)}
                 onOut={() => clearLinkHover(hit, side)}
-                onClick={() => follow(hit.to, side)}
+                onClick={() => {
+                  // On a phone the first press brings that physical page close;
+                  // once it is readable, the same printed link performs its
+                  // authored action without leaving this camera mode behind.
+                  if (MOBILE_EXPERIENCE && pageZoom !== side) onPageZoom?.(side)
+                  else follow(hit.to, side)
+                }}
               />
             ))}
 
@@ -1985,6 +2127,10 @@ export default function Book({
                 onOver={() => setImageHover(hit, side)}
                 onOut={() => clearImageHover(hit, side)}
                 onClick={() => {
+                  if (MOBILE_EXPERIENCE && pageZoom !== side) {
+                    onPageZoom?.(side)
+                    return
+                  }
                   if (hit.to) {
                     follow(hit.to, side)
                     return

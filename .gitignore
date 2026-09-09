@@ -24,3 +24,7 @@ tools/**/*.blend1
 # GitHub Pages sites. The Pages workflow downloads this one large Unity payload
 # from the `unity-webgl-v1` GitHub Release before building the deploy artifact.
 public/unity/Build/WebGL.data.unityweb
+
+# The mobile player is intentionally shipped uncompressed. Keep obsolete
+# compressed outputs from earlier test builds out of the Pages repository.
+public/unity-mobile/Build/*.unityweb

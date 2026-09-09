@@ -1,13 +1,17 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { profile } from '../data/profile'
-import { projects } from '../data/projects'
-import { useReveal } from '../lib/hooks'
+import { useNavigate } from 'react-router-dom'
 import { attachScrollDriver } from '../lib/scroll'
-import { isMuted, primeAudio, resumeAudio, setMuted, stopAudio, subscribeAudio } from '../lib/audio'
+import {
+  isMuted,
+  resumeAudio,
+  setCampAudioSuppressed,
+  setMuted,
+  subscribeAudio,
+} from '../lib/audio'
 import { markProfileEvent } from '../lib/performanceProfile'
+import { MOBILE_EXPERIENCE } from '../lib/graphics'
 import CampLoader, { type LoadStage } from '../components/CampLoader'
-import type { PageScreenRect } from '../three/campsite/Book'
+import type { PageScreenRect, PageSide } from '../three/campsite/Book'
 
 const CampHero = lazy(() => import('../three/CampHero'))
 const CampUI = lazy(() => import('../components/CampUI'))
@@ -39,9 +43,19 @@ const BookZoom = lazy(loadBookZoom)
  */
 const LOADER_TIMEOUT_MS = 20000
 
+function PageZoomGlyph({ mode }: { mode: 'in' | 'out' }) {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="13.5" cy="13.5" r="8.5" />
+      <path d="m20 20 8 8" />
+      <path d="M9.5 13.5h8" />
+      {mode === 'in' && <path d="M13.5 9.5v8" />}
+    </svg>
+  )
+}
+
 /* -------------------------------------------------------------------------- */
-/*  Landing page. The hero is the campsite scene; everything below it is the    */
-/*  plain-HTML version of the same material for anyone who scrolls past.        */
+/*  Landing page. The campsite and its journals are the complete experience.   */
 /* -------------------------------------------------------------------------- */
 
 export default function About() {
@@ -56,7 +70,20 @@ export default function About() {
     const i = room === null ? NaN : Number(room)
     return i >= 0 && i <= 2 ? i : null
   })
+  const [mobilePageZoom, setMobilePageZoom] = useState<PageSide | null>(null)
   const [audioMuted, setAudioMuted] = useState(isMuted())
+  const [mobileLandscape, setMobileLandscape] = useState(
+    () => MOBILE_EXPERIENCE && window.matchMedia('(orientation: landscape)').matches
+  )
+
+  useEffect(() => {
+    if (!MOBILE_EXPERIENCE) return
+    const orientation = window.matchMedia('(orientation: landscape)')
+    const syncOrientation = () => setMobileLandscape(orientation.matches)
+    syncOrientation()
+    orientation.addEventListener('change', syncOrientation)
+    return () => orientation.removeEventListener('change', syncOrientation)
+  }, [])
 
   /*
     Loading state.
@@ -152,7 +179,15 @@ export default function About() {
   // The activity gate must never interrupt loading/prewarm. In particular,
   // LOADER_TIMEOUT_MS may reveal the page before a slow driver's real warmup
   // finishes; `campReady`, unlike `stage`, only changes on Warmup's callback.
-  const campActive = !campReady || (heroVisible && documentVisible)
+  // Mobile is a locked, single-viewport experience: the camp cannot actually
+  // leave the screen. iOS Safari can nevertheless report the sticky section as
+  // non-intersecting while its address bars resize the visual viewport. That
+  // false negative used to remove CampUI (name + tap hint), pause the renderer,
+  // and leave its tent hit targets inert. Visibility alone is the correct
+  // mobile activity gate; desktop keeps its scroll/intersection optimization.
+  const campActive = MOBILE_EXPERIENCE
+    ? documentVisible
+    : !campReady || (heroVisible && documentVisible)
 
   // CampHero's first progress report proves its own large chunk has already
   // arrived. Only then, and in an idle slice behind the opaque curtain, fetch
@@ -183,22 +218,6 @@ export default function About() {
     }
   }, [])
 
-  // AudioContext creation and noise-buffer synthesis are allowed before the
-  // autoplay gesture even though playback is not. Do them behind the loading
-  // curtain so the first tent click only resumes an already-built graph.
-  useEffect(() => {
-    const w = window as Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
-      cancelIdleCallback?: (id: number) => void
-    }
-    if (w.requestIdleCallback) {
-      const id = w.requestIdleCallback(primeAudio, { timeout: 1000 })
-      return () => w.cancelIdleCallback?.(id)
-    }
-    const id = window.setTimeout(primeAudio, 160)
-    return () => window.clearTimeout(id)
-  }, [])
-
   // Browsers refuse to start audio without a gesture, so the ambience waits for
   // the first real interaction and then fades itself in.
   useEffect(() => {
@@ -211,22 +230,11 @@ export default function About() {
       window.removeEventListener('pointerdown', start)
       window.removeEventListener('keydown', start)
       window.removeEventListener('wheel', start)
-      stopAudio()
     }
   }, [])
 
   // Drives the three.js scene without re-rendering React.
   useEffect(() => attachScrollDriver(() => heroRef.current), [])
-
-  const introRef = useReveal<HTMLDivElement>()
-  const expRef = useReveal<HTMLDivElement>()
-  const skillsRef = useReveal<HTMLDivElement>()
-  const eduRef = useReveal<HTMLDivElement>()
-
-  const featured = [
-    ...projects.filter((p) => p.featured && p.type === 'game').slice(0, 2),
-    ...projects.filter((p) => p.featured && p.type === 'tool').slice(0, 2),
-  ]
 
   const inRoom = entered !== null
 
@@ -238,6 +246,7 @@ export default function About() {
   const handleBackToFire = useCallback(() => {
     if (entered === null || guardingBackClick) return
     setGuardingBackClick(true)
+    setMobilePageZoom(null)
     setEntered(null)
     if (backClickTimer.current !== null) window.clearTimeout(backClickTimer.current)
     backClickTimer.current = window.setTimeout(() => {
@@ -269,7 +278,10 @@ export default function About() {
   // click), so this is also what makes it false again for the next tent.
   const [bookRequested, setBookRequested] = useState(false)
   useEffect(() => {
-    if (entered === null) setBookRequested(false)
+    if (entered === null) {
+      setBookRequested(false)
+      setMobilePageZoom(null)
+    }
   }, [entered])
 
   // Opening a journal is a strong signal that its playable build may be next.
@@ -307,11 +319,53 @@ export default function About() {
       return { x: w * 0.52, y: h * 0.24, w: w * 0.29, h: h * 0.62 }
     }
   )
+  const [mobilePlayerReady, setMobilePlayerReady] = useState(!MOBILE_EXPERIENCE)
   useEffect(() => {
     playingRef.current = playingFrom
     markProfileEvent(playingFrom === null ? 'player-closed' : 'player-requested', {
       category: 'player',
     })
+  }, [playingFrom])
+
+  useEffect(() => {
+    if (playingFrom === null) return
+    setCampAudioSuppressed(true)
+    return () => setCampAudioSuppressed(false)
+  }, [playingFrom])
+
+  useEffect(() => {
+    if (!MOBILE_EXPERIENCE) return
+    if (playingFrom === null) {
+      setMobilePlayerReady(false)
+      return
+    }
+
+    // Let React remove the Three canvas first, then release drei/Three loader
+    // caches before Unity reserves its WASM heap and creates a second WebGL
+    // context. R3F schedules its final root disposal 500ms after unmount.
+    // Wait beyond that callback rather than assuming two frames dispose it.
+    let cancelled = false
+    let secondFrame = 0
+    let timer = 0
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        timer = window.setTimeout(() => {
+          void import('../three/CampHero').then(({ releaseCampAssetCaches }) => {
+            if (cancelled) return
+            releaseCampAssetCaches()
+            markProfileEvent('mobile-camp-released', { category: 'camp' })
+            setMobilePlayerReady(true)
+          })
+        }, 650)
+      })
+    })
+
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+      if (timer) window.clearTimeout(timer)
+    }
   }, [playingFrom])
 
   useEffect(() => {
@@ -322,11 +376,13 @@ export default function About() {
     if (entered === null) setPlayingFrom(null)
   }, [entered])
 
-  // Unity owns the entire visible stage while its player is mounted. Keep the
-  // campsite alive in memory, but stop its R3F and particle render work so the
-  // two WebGL contexts do not compete for the same frame budget. Startup
-  // prewarm remains uninterruptible if the dev-only ?play=1 shortcut is used.
-  const campRenderActive = !campReady || (campActive && playingFrom === null)
+  // Unity owns the entire visible stage while its player is mounted. Desktop
+  // keeps the campsite alive for the page-to-player transition. Mobile fully
+  // unmounts it so Safari never has two large WebGL contexts resident at once.
+  const campRenderActive =
+    !campReady ||
+    (campActive && playingFrom === null && (!MOBILE_EXPERIENCE || !mobileLandscape))
+  const campMounted = !MOBILE_EXPERIENCE || playingFrom === null
 
   useEffect(() => {
     markProfileEvent(campRenderActive ? 'renderer-resumed' : 'renderer-paused', {
@@ -367,40 +423,12 @@ export default function About() {
         progress={stage === 'assets' ? assetProgress : stage === 'boot' ? 0.5 : 1}
       />
 
-      {/*
-        Turn the phone.
-
-        The camp is a landscape composition — three tents on an arc around a
-        fire, with the middle one centred — and there is no portrait crop of it
-        that keeps all three in frame and still leaves the journal readable.
-        Rather than ship a second composition nobody asked for, a touch device
-        held upright is asked to turn. Shown and hidden entirely in CSS, on
-        `(orientation: portrait) and (pointer: coarse)`, so it costs nothing on
-        a desktop and cannot get out of step with a resize the way a JS media
-        query listener can.
-
-        Screen Orientation's `lock()` is deliberately not called: outside
-        fullscreen it rejects on every browser that matters, and a rejected
-        promise on load is worse than a card that says what to do.
-      */}
-      <div className="rotategate" role="status">
-        <div className="rotategate__inner">
-          <svg className="rotategate__glyph" viewBox="0 0 64 64" aria-hidden="true">
-            <rect x="20" y="6" width="24" height="42" rx="4" />
-            <path d="M12 40a22 22 0 0 0 40 0" />
-          </svg>
-          <p className="rotategate__title">Turn your device</p>
-          <p className="rotategate__body">
-            The campsite is built for landscape. Rotate to sit down at the fire.
-          </p>
-        </div>
-      </div>
-
       {/* --------------------------------------------------------------- hero */}
-      <section className="hero hero--camp" ref={heroRef} aria-label="Campsite">
+      <section className="hero hero--camp" id="main" ref={heroRef} aria-label="Campsite">
         <div className="hero__stage">
-          <Suspense fallback={<div className="hero__canvas" />}>
-            <CampHero
+          {campMounted && (
+            <Suspense fallback={<div className="hero__canvas" />}>
+              <CampHero
               active={campRenderActive}
               entered={entered}
               onEnter={setEntered}
@@ -408,21 +436,68 @@ export default function About() {
                 // Not a route. The build opens out of the page inside the tent,
                 // so the campsite stays exactly where it is.
                 if (to.startsWith('play:')) {
-                  if (from) setPlayingFrom(from)
+                  if (from) {
+                    // Unity owns audible output from the initiating click until
+                    // its player closes. The persistent audio gate also blocks
+                    // the app-wide gesture unlockers while the canvas is open.
+                    setCampAudioSuppressed(true)
+                    if (MOBILE_EXPERIENCE) {
+                      void import('../three/CampHero').then(({ retireMobileCampRenderer }) => {
+                        retireMobileCampRenderer()
+                        setPlayingFrom(from)
+                      })
+                    } else setPlayingFrom(from)
+                  }
                   return
                 }
                 setEntered(null)
                 navigate(to)
               }}
               onZoom={(src, from) => setZoomed({ src, from })}
+              pageZoom={mobilePageZoom}
+              onPageZoom={setMobilePageZoom}
               onBookOpenRequest={() => setBookRequested(true)}
-              onBookClose={() => setBookRequested(false)}
+              onBookClose={() => {
+                setBookRequested(false)
+                setMobilePageZoom(null)
+              }}
               onProgress={handleProgress}
               onReady={handleReady}
-            />
-          </Suspense>
+              />
+            </Suspense>
+          )}
 
-          {!impostorInspection && (
+          {MOBILE_EXPERIENCE && mobileLandscape && playingFrom === null && (
+            <div className="camp-orientation" role="status" aria-live="polite">
+              <span className="camp-orientation__phone" aria-hidden="true" />
+              <strong>Rotate your phone upright</strong>
+              <small>The campsite and journal are designed for portrait</small>
+            </div>
+          )}
+
+          {MOBILE_EXPERIENCE && !mobileLandscape && inRoom && bookRequested && playingFrom === null && zoomed === null && (
+            <div className="book-page-zoom" data-zoomed={mobilePageZoom !== null}>
+              {mobilePageZoom === null ? (
+                <>
+                  <button type="button" className="book-page-zoom__button book-page-zoom__button--left" onClick={() => setMobilePageZoom('left')} aria-label="Zoom in on left journal page">
+                    <PageZoomGlyph mode="in" />
+                    <span>Read left</span>
+                  </button>
+                  <button type="button" className="book-page-zoom__button book-page-zoom__button--right" onClick={() => setMobilePageZoom('right')} aria-label="Zoom in on right journal page">
+                    <PageZoomGlyph mode="in" />
+                    <span>Read right</span>
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="book-page-zoom__button book-page-zoom__button--out" onClick={() => setMobilePageZoom(null)} aria-label="Zoom out to the full journal">
+                  <PageZoomGlyph mode="out" />
+                  <span>Full book</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {!impostorInspection && campMounted && (!MOBILE_EXPERIENCE || !mobileLandscape) && (
             <Suspense fallback={null}>
               <CampUI
                 active={campActive}
@@ -430,7 +505,7 @@ export default function About() {
                 inRoom={inRoom}
                 showBookHint={inRoom && !bookRequested && playingFrom === null}
                 showPageHint={
-                  inRoom && bookRequested && playingFrom === null && zoomed === null
+                  inRoom && bookRequested && playingFrom === null && zoomed === null && mobilePageZoom === null
                 }
               />
             </Suspense>
@@ -438,7 +513,25 @@ export default function About() {
 
           {playingFrom && (
             <Suspense fallback={null}>
-              <BookPlayer from={playingFrom} onClose={() => setPlayingFrom(null)} />
+              <BookPlayer
+                from={playingFrom}
+                autoStart={mobilePlayerReady}
+                onClose={() => {
+                  if (MOBILE_EXPERIENCE) {
+                    // Quit() has completed, but Safari can retain Unity's
+                    // WebAssembly/WebGL allocations until the document is
+                    // replaced. Reload immediately without mounting Three in
+                    // this document, preserving the crash fix without an
+                    // unnecessary confirmation screen.
+                    markProfileEvent('camp-reload-requested', { category: 'camp' })
+                    window.requestAnimationFrame(() => window.location.reload())
+                    return
+                  }
+                  setCampAudioSuppressed(false)
+                  resumeAudio()
+                  setPlayingFrom(null)
+                }}
+              />
             </Suspense>
           )}
 
@@ -448,7 +541,7 @@ export default function About() {
             </Suspense>
           )}
 
-          {!impostorInspection && (
+          {!impostorInspection && (!MOBILE_EXPERIENCE || !mobileLandscape) && (
             <>
               <button
                 className="tentswitch audioswitch"
@@ -457,7 +550,8 @@ export default function About() {
                 aria-pressed={!audioMuted}
                 aria-label={audioMuted ? 'Unmute ambience' : 'Mute ambience'}
               >
-                {audioMuted ? '🔇 Sound off' : '🔊 Sound on'}
+                <span className="audioswitch__icon" aria-hidden="true">{audioMuted ? '🔇' : '🔊'}</span>
+                <span>{audioMuted ? 'Sound off' : 'Sound on'}</span>
               </button>
 
               <button
@@ -477,158 +571,6 @@ export default function About() {
         </div>
       </section>
 
-      {/* -------------------------------------------------------------- intro */}
-      <section className="section" id="main">
-        <div className="wrap">
-          <div className="reveal" ref={introRef}>
-            <p className="eyebrow">About</p>
-            <div className="about-grid" style={{ marginTop: 34 }}>
-              <div>
-                {[...profile.summary, ...profile.whatIBuild].map((para) => (
-                  <p key={para.slice(0, 24)}>{para}</p>
-                ))}
-              </div>
-
-              <dl className="factlist">
-                <div>
-                  <dt>Based in</dt>
-                  <dd>{profile.location}</dd>
-                </div>
-                <div>
-                  <dt>Focus</dt>
-                  <dd>Gameplay systems · Unity editor tools</dd>
-                </div>
-                <div>
-                  <dt>Platforms</dt>
-                  <dd>{profile.platforms.join(' · ')}</dd>
-                </div>
-                <div>
-                  <dt>Currently</dt>
-                  <dd>Pursuing independent projects</dd>
-                </div>
-                <div>
-                  <dt>Contact</dt>
-                  <dd>
-                    <a href={`mailto:${profile.email}`} style={{ borderBottom: '1px solid var(--line)' }}>
-                      {profile.email}
-                    </a>
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* -------------------------------------------------------------- stats */}
-      <div className="statband">
-        {profile.stats.map((s) => (
-          <div key={s.label}>
-            <b className={`accent-${s.accent}`}>{s.value}</b>
-            <span>{s.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* ----------------------------------------------------------- featured */}
-      <section className="section section--tight">
-        <div className="wrap">
-          <p className="eyebrow">Selected work</p>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(238px, 1fr))',
-              gap: 1,
-              background: 'var(--line-soft)',
-              border: '1px solid var(--line-soft)',
-              marginTop: 26,
-            }}
-          >
-            {featured.map((p) => (
-              <Link
-                key={p.slug}
-                to={`/projects/${p.slug}`}
-                style={{ background: 'var(--paper)', padding: '26px 24px', display: 'block' }}
-              >
-                <div className="mono" style={{ color: `var(--${p.accent === 'ink' ? 'ink-3' : p.accent})` }}>
-                  {p.type === 'game' ? 'Game' : 'Tool'} · {p.year}
-                </div>
-                <h3 style={{ margin: '12px 0 8px', fontSize: '1.25rem', fontWeight: 800 }}>
-                  {p.title}
-                </h3>
-                <p className="muted" style={{ margin: 0, fontSize: '0.92rem' }}>
-                  {p.blurb}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* --------------------------------------------------------- experience */}
-      <section className="section">
-        <div className="wrap reveal" ref={expRef}>
-          <p className="eyebrow">Experience</p>
-          <div className="timeline" style={{ marginTop: 28 }}>
-            {profile.experience.map((job) => (
-              <article className="job" key={job.company}>
-                <div className="job__meta">
-                  <h3>{job.company}</h3>
-                  <div className="job__period">{job.period}</div>
-                  <div className="job__place">{job.place}</div>
-                </div>
-                <div>
-                  <p className="job__role">{job.role}</p>
-                  <ul>
-                    {job.points.map((pt) => (
-                      <li key={pt.slice(0, 30)}>{pt}</li>
-                    ))}
-                  </ul>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ------------------------------------------------------------- skills */}
-      <section className="section section--tight">
-        <div className="wrap reveal" ref={skillsRef}>
-          <p className="eyebrow">Skills</p>
-          <div className="skills" style={{ marginTop: 26 }}>
-            {profile.skills.map((g) => (
-              <div className="skills__group" key={g.group}>
-                <h3>{g.group}</h3>
-                <div className="chips">
-                  {g.items.map((i) => (
-                    <span className="chip" key={i}>
-                      {i}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ---------------------------------------------------------- education */}
-      <section className="section section--tight" style={{ paddingBottom: 'clamp(60px, 9vw, 120px)' }}>
-        <div className="wrap reveal" ref={eduRef}>
-          <p className="eyebrow">Education</p>
-          <div className="timeline" style={{ marginTop: 26 }}>
-            {profile.education.map((e) => (
-              <div className="job" key={e.school}>
-                <div className="job__meta">
-                  <h3>{e.school}</h3>
-                  <div className="job__period">{e.period}</div>
-                </div>
-                <p style={{ margin: 0, color: 'var(--ink-2)' }}>{e.detail}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
     </div>
   )
 }

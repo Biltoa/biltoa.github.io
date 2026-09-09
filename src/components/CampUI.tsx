@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { profile } from '../data/profile'
-import { GRAPHICS_DPR } from '../lib/graphics'
+import { GRAPHICS_DPR, MOBILE_EXPERIENCE } from '../lib/graphics'
 
 /* -------------------------------------------------------------------------- */
 /*  DOM layer for the campsite concept: the name block with its ember drift,    */
@@ -478,7 +478,7 @@ export default function CampUI({
           <i className="campui__hintcursor-ring" />
           <i className="campui__hintcursor-dot" />
         </span>
-        <span>Click a page or drag it to turn</span>
+        <span>{MOBILE_EXPERIENCE ? 'Drag page to turn' : 'Click a page or drag it to turn'}</span>
       </div>
     </>
   )

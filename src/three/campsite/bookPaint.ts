@@ -158,8 +158,17 @@ const prints = new Map<string, HTMLImageElement | null>()
  * does and exactly what opening the page directly does not.
  */
 const inflight = new Map<string, Promise<void>>()
+let printGeneration = 0
+
+/** Called only after the mobile camp has unmounted. */
+export function releaseBookImages() {
+  printGeneration++
+  prints.clear()
+  inflight.clear()
+}
 
 function fetchPrint(src: string, onEach?: (src: string) => void): Promise<void> {
+  const generation = printGeneration
   const existing = inflight.get(src)
   // A second caller for the same source gets the decode already in flight, but
   // it still has to be told when that decode lands — the derived promise is
@@ -177,13 +186,13 @@ function fetchPrint(src: string, onEach?: (src: string) => void): Promise<void> 
     const img = new Image()
     img.decoding = 'async'
     img.onload = () => {
-      prints.set(src, img)
+      if (generation === printGeneration) prints.set(src, img)
       resolve()
     }
     img.onerror = () => resolve()
     img.src = src
   }).then(() => {
-    onEach?.(src)
+    if (generation === printGeneration) onEach?.(src)
   })
 
   inflight.set(src, p)

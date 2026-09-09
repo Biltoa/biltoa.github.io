@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PageScreenRect } from '../three/campsite/Book'
+import { MOBILE_EXPERIENCE } from '../lib/graphics'
 import { markProfileEvent } from '../lib/performanceProfile'
 import { useUnityHost } from './unityBuild'
 
@@ -19,20 +20,43 @@ type Phase = 'from-page' | 'open' | 'closing'
 
 export default function BookPlayer({
   from,
+  autoStart = true,
   onClose,
 }: {
   /** The page's footprint on screen when it was pressed. */
   from: PageScreenRect
+  /** Delays engine allocation until a previous WebGL stage has been released. */
+  autoStart?: boolean
   onClose: () => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const playerScrollYRef = useRef(typeof window === 'undefined' ? 0 : window.scrollY)
   const [phase, setPhase] = useState<Phase>('from-page')
+  const [closeError, setCloseError] = useState('')
+  const [mobilePortrait, setMobilePortrait] = useState(
+    () => MOBILE_EXPERIENCE && window.matchMedia('(orientation: portrait)').matches,
+  )
 
-  const unity = useUnityHost(canvasRef, { title: 'Gameplay Demo', autoStart: true })
+  const unity = useUnityHost(canvasRef, {
+    title: 'Gameplay Demo',
+    autoStart: autoStart && (!MOBILE_EXPERIENCE || (phase !== 'closing' && !mobilePortrait)),
+  })
 
   useEffect(() => {
     markProfileEvent('mounted', { category: 'player' })
-    return () => markProfileEvent('unmounted', { category: 'player' })
+    return () => {
+      if (MOBILE_EXPERIENCE) window.scrollTo({ top: playerScrollYRef.current, behavior: 'auto' })
+      markProfileEvent('unmounted', { category: 'player' })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!MOBILE_EXPERIENCE) return
+    const portrait = window.matchMedia('(orientation: portrait)')
+    const update = () => setMobilePortrait(portrait.matches)
+    update()
+    portrait.addEventListener('change', update)
+    return () => portrait.removeEventListener('change', update)
   }, [])
 
   useEffect(() => {
@@ -61,7 +85,25 @@ export default function BookPlayer({
     setPhase('closing')
     // Long enough for the frame to land back on the page before the element
     // goes; matches the transition below.
-    window.setTimeout(onClose, 620)
+    window.setTimeout(() => {
+      if (!MOBILE_EXPERIENCE) {
+        onClose()
+        return
+      }
+      markProfileEvent('close-animation-finished', { category: 'player' })
+      void unity.stop().then(async () => {
+        // Keep Three unmounted until Unity has actually finished, including
+        // a pending startup. Give the browser time to retire its resources.
+        markProfileEvent('mobile-quit-settled', { category: 'player' })
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 250))
+        window.scrollTo({ top: playerScrollYRef.current, behavior: 'auto' })
+        markProfileEvent('mobile-camp-return-allowed', { category: 'player' })
+        onClose()
+      }).catch((reason: unknown) => {
+        setCloseError(reason instanceof Error ? reason.message : 'Unable to close Unity. Please reload this page.')
+      })
+    }, 620)
   }
 
   useEffect(() => {
@@ -78,7 +120,7 @@ export default function BookPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
-  const onPage = phase !== 'open'
+  const onPage = phase !== 'open' && !(MOBILE_EXPERIENCE && phase === 'closing')
   const frame: React.CSSProperties = onPage
     ? {
         left: `${from.x}px`,
@@ -87,12 +129,19 @@ export default function BookPlayer({
         height: `${from.h}px`,
         opacity: phase === 'closing' ? 0 : 1,
       }
-    : { left: '0px', top: '0px', width: '100%', height: '100%', opacity: 1 }
+    : { left: '0px', top: '0px', width: '100%', height: '100%', opacity: phase === 'closing' ? 0 : 1 }
 
   const pct = Math.round(unity.progress * 100)
+  const fullscreenDocument = document as Document & { webkitFullscreenEnabled?: boolean }
+  const fullscreenAvailable =
+    document.fullscreenEnabled || Boolean(fullscreenDocument.webkitFullscreenEnabled)
+  const requestFullscreen = async () => {
+    await unity.fullscreen()
+  }
 
   return (
     <div className="bookplayer" data-phase={phase} aria-live="polite">
+      {closeError && <p role="alert" style={{ position: 'fixed', inset: '40% 10% auto', zIndex: 10 }}>{closeError}</p>}
       {/* The page whitening out. Behind the frame, so the frame appears to be
           what is left once the ink has gone. */}
       <div
@@ -108,8 +157,20 @@ export default function BookPlayer({
       <div className="bookplayer__frame" style={frame}>
         <canvas ref={canvasRef} id="unity-canvas" tabIndex={-1} />
 
-        <div className="bookplayer__veil" data-hidden={unity.status === 'ready'}>
-          {unity.status !== 'ready' && (
+        {mobilePortrait && (
+          <div className="bookplayer__rotate" role="status">
+            <span className="bookplayer__rotate-phone" aria-hidden="true" />
+            <strong>Rotate your phone</strong>
+            <small>The gameplay demo opens in landscape.</small>
+          </div>
+        )}
+
+        {!mobilePortrait && <div className="bookplayer__veil" data-hidden={unity.status === 'ready' && !unity.rotating}>
+          {unity.rotating ? (
+            <div>
+              <p className="mono bookplayer__label">Adjusting the view</p>
+            </div>
+          ) : unity.status !== 'ready' && (
             <>
               {unity.status === 'missing' && (
                 <div>
@@ -141,28 +202,28 @@ export default function BookPlayer({
               )}
             </>
           )}
-        </div>
+        </div>}
 
-        <div className="bookplayer__controls">
-          <button className="btn btn--ghost" data-sfx="back" onClick={close}>
-            ← Back to the journal <kbd>Esc</kbd>
+        <div className="bookplayer__controls" data-portrait={mobilePortrait || undefined}>
+          <button className="btn btn--ghost bookplayer__back" data-sfx="back" onClick={close}>
+            ← Back to the fire {!MOBILE_EXPERIENCE && <kbd>Esc</kbd>}
           </button>
-          <button
+          {!mobilePortrait && !MOBILE_EXPERIENCE && <button
             className="btn btn--ghost"
             data-sfx="toggle"
             onClick={unity.toggleMute}
             disabled={unity.status !== 'ready'}
           >
             {unity.muted ? '🔇 Unmute' : '🔊 Mute'}
-          </button>
-          <button
+          </button>}
+          {!mobilePortrait && (!MOBILE_EXPERIENCE || fullscreenAvailable) && <button
             className="btn btn--ghost"
             data-sfx="fullscreen"
-            onClick={unity.fullscreen}
+            onClick={requestFullscreen}
             disabled={unity.status !== 'ready'}
           >
             ⛶ Fullscreen
-          </button>
+          </button>}
         </div>
       </div>
     </div>
