@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import BackToFire from './components/BackToFire'
 import Footer from './components/Footer'
+import SeoMetadata from './components/SeoMetadata'
 import About from './pages/About'
 import ProjectDetail from './pages/ProjectDetail'
 import {
@@ -101,6 +102,7 @@ export default function App() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
+      <SeoMetadata />
       {!landing && <BackToFire />}
       <ScrollToTop />
 

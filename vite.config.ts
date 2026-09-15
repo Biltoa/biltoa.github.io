@@ -1,9 +1,92 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { projects } from './src/data/projects'
+import {
+  SITE_ORIGIN,
+  absoluteSiteUrl,
+  projectDescription,
+  projectStructuredData,
+} from './src/data/seo'
+
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }
+    return entities[character]
+  })
+
+const replaceElementById = (html: string, id: string, replacement: string) =>
+  html.replace(new RegExp(`<[^>]+id=["']${id}["'][^>]*>`, 'i'), replacement)
+
+/**
+ * Emit a real HTML entry point for every public project route. Search crawlers
+ * and link unfurlers receive its identity and readable copy immediately, while
+ * React replaces the static shell with the interactive page once it starts.
+ */
+function staticProjectPages(): Plugin {
+  return {
+    name: 'static-project-pages',
+    apply: 'build',
+    async writeBundle(outputOptions) {
+      const outputDirectory = resolve(process.cwd(), outputOptions.dir ?? 'dist')
+      const template = await readFile(join(outputDirectory, 'index.html'), 'utf8')
+
+      await Promise.all(
+        projects.map(async (project) => {
+          const title = `${project.title} | Ahmad Bilto`
+          const description = projectDescription(project)
+          const canonical = `${SITE_ORIGIN}/projects/${project.slug}/`
+          const image = absoluteSiteUrl(project.thumb ?? '/social-card.png')
+          const projectType = project.type === 'game' ? 'Game' : 'Unity editor tool'
+          const overview = project.overview.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join('')
+          const projectShell = `<main class="seo-shell seo-shell--project"><div class="seo-shell__inner"><p><a href="/">← Ahmad Bilto</a></p><p class="seo-shell__eyebrow">${projectType}</p><h1>${escapeHtml(project.title)}</h1><p class="seo-shell__role">${escapeHtml(project.subtitle)}</p><p class="seo-shell__copy">${escapeHtml(project.blurb)}</p><h2>Overview</h2>${overview}</div></main>`
+
+          let html = template.replace(/<title>.*?<\/title>/is, `<title>${escapeHtml(title)}</title>`)
+          html = replaceElementById(
+            html,
+            'meta-description',
+            `<meta id="meta-description" name="description" content="${escapeHtml(description)}">`,
+          )
+          html = replaceElementById(
+            html,
+            'canonical-link',
+            `<link id="canonical-link" rel="canonical" href="${canonical}">`,
+          )
+          html = replaceElementById(html, 'og-title', `<meta id="og-title" property="og:title" content="${escapeHtml(title)}">`)
+          html = replaceElementById(html, 'og-description', `<meta id="og-description" property="og:description" content="${escapeHtml(description)}">`)
+          html = replaceElementById(html, 'og-type', '<meta id="og-type" property="og:type" content="article">')
+          html = replaceElementById(html, 'og-url', `<meta id="og-url" property="og:url" content="${canonical}">`)
+          html = replaceElementById(html, 'og-image', `<meta id="og-image" property="og:image" content="${image}">`)
+          html = replaceElementById(html, 'og-image-alt', `<meta id="og-image-alt" property="og:image:alt" content="${escapeHtml(`${project.title} by Ahmad Bilto`)}">`)
+          html = replaceElementById(html, 'twitter-title', `<meta id="twitter-title" name="twitter:title" content="${escapeHtml(title)}">`)
+          html = replaceElementById(html, 'twitter-description', `<meta id="twitter-description" name="twitter:description" content="${escapeHtml(description)}">`)
+          html = replaceElementById(html, 'twitter-image', `<meta id="twitter-image" name="twitter:image" content="${image}">`)
+          html = html.replace(
+            /<script id="structured-data" type="application\/ld\+json">.*?<\/script>/is,
+            `<script id="structured-data" type="application/ld+json">${JSON.stringify(projectStructuredData(project)).replaceAll('<', '\\u003c')}</script>`,
+          )
+          html = html.replace(
+            /<!--seo-content-start-->.*?<!--seo-content-end-->/is,
+            `<!--seo-content-start-->${projectShell}<!--seo-content-end-->`,
+          )
+
+          const routeDirectory = join(outputDirectory, 'projects', project.slug)
+          await mkdir(routeDirectory, { recursive: true })
+          await writeFile(join(routeDirectory, 'index.html'), html, 'utf8')
+        }),
+      )
+    },
+  }
+}
 
 const FPS_PROFILE_ROUTE = '/__fps-profile'
 const FPS_SAMPLE_FLOATS = 5
@@ -391,7 +474,7 @@ function unityBuildHeaders(): Plugin {
 // If this ever moves to a GitHub Pages project repo, set base: '/repo-name/'.
 export default defineConfig({
   base: '/',
-  plugins: [unityBuildHeaders(), react()],
+  plugins: [unityBuildHeaders(), react(), staticProjectPages()],
   server: {
     port: 5173,
     open: true,

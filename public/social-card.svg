@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="fire" cx="22%" cy="28%" r="65%">
+      <stop offset="0" stop-color="#6a321c"/>
+      <stop offset=".48" stop-color="#151326"/>
+      <stop offset="1" stop-color="#070914"/>
+    </radialGradient>
+    <linearGradient id="line" x1="0" x2="1">
+      <stop stop-color="#ffba60"/>
+      <stop offset="1" stop-color="#ffba60" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#fire)"/>
+  <circle cx="1035" cy="105" r="2.5" fill="#fdf6ea" opacity=".8"/>
+  <circle cx="1100" cy="180" r="4" fill="#ffba60" opacity=".55"/>
+  <circle cx="945" cy="245" r="2" fill="#fdf6ea" opacity=".55"/>
+  <circle cx="1080" cy="330" r="3" fill="#fdf6ea" opacity=".4"/>
+  <text x="80" y="160" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="104" font-weight="700" letter-spacing="2">AB.</text>
+  <text x="80" y="285" fill="#fdf6ea" font-family="Arial, Helvetica, sans-serif" font-size="86" font-weight="800" letter-spacing="-3">Ahmad Bilto</text>
+  <rect x="80" y="324" width="690" height="3" fill="url(#line)"/>
+  <text x="80" y="380" fill="#ffba60" font-family="Consolas, monospace" font-size="28" letter-spacing="5">UNITY GAMEPLAY &amp; TOOLS DEVELOPER</text>
+  <text x="80" y="472" fill="#fdf6ea" font-family="Arial, Helvetica, sans-serif" font-size="27">10 shipped titles  ·  Mobile, Steam &amp; PlayStation</text>
+  <text x="80" y="520" fill="#fdf6ea" font-family="Arial, Helvetica, sans-serif" font-size="27">200K+ downloads on a solo multiplayer title</text>
+  <text x="80" y="577" fill="#ffcf88" font-family="Consolas, monospace" font-size="20" letter-spacing="2">AHMADBILTO.COM</text>
+</svg>

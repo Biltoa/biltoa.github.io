@@ -64,11 +64,7 @@ export default function ProjectDetail() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
-    if (project) document.title = `${project.title} — Ahmad Bilto`
-    return () => {
-      document.title = 'Ahmad Bilto — Unity Gameplay & Tools Developer'
-    }
-  }, [slug, project])
+  }, [slug])
 
   if (!project) {
     return (
@@ -272,13 +268,13 @@ export default function ProjectDetail() {
 
       <nav className="pager" aria-label="Project navigation">
         {prev && (
-          <Link to={`/projects/${prev.slug}`}>
+          <Link to={`/projects/${prev.slug}/`}>
             <small>← Previous</small>
             <strong>{prev.title}</strong>
           </Link>
         )}
         {next && (
-          <Link to={`/projects/${next.slug}`}>
+          <Link to={`/projects/${next.slug}/`}>
             <small>Next →</small>
             <strong>{next.title}</strong>
           </Link>
